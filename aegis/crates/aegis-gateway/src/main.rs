@@ -422,13 +422,8 @@ fn create_tun_config(args: &Args) -> anyhow::Result<tun2::Configuration> {
 
     config.tun_name(&args.tun_name);
 
-    // Explicitly disable packet information on Linux to ensure raw IP packets
-    // (no 4-byte PI header). tun2 v4 defaults PI to false on Linux, but being
-    // explicit prevents breakage if the default ever changes.
-    #[cfg(target_os = "linux")]
-    config.platform_config(|platform| {
-        platform.packet_information(false);
-    });
+    // Note: tun2 v4 always delivers raw IP packets without platform headers
+    // on all platforms, so no explicit packet_information(false) call is needed.
 
     Ok(config)
 }
