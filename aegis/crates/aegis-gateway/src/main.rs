@@ -1,22 +1,43 @@
 //! Aegis Gateway (Layer 3) — The Sentinel
 //!
 //! Quantum Gateway providing:
+//! - TUN virtual network interface creation (via `tun2`)
 //! - Safe IP header parsing (IPv4 + IPv6, no panics on malformed input)
 //! - Protocol classification (ICMP, TCP, UDP)
-//! - Atomic pipeline statistics (packet/byte counters)
+//! - Platform-aware packet handling (macOS 4-byte AF header, Linux raw IP)
+//! - Atomic pipeline statistics with periodic reporting
+//! - Graceful shutdown via Ctrl+C with clean TUN teardown
 //! - Structured logging with env-filter
 //!
-//! The TUN device creation requires root privileges and platform-specific
-//! drivers (Linux `/dev/net/tun`, macOS `utun`). This binary detects root
-//! privileges and logs pipeline stats.
+//! Run with: sudo cargo run -p aegis-gateway -- --tun-name aegis0
+//! Test with: ping -c 4 10.0.0.254 (in another terminal)
 
+use clap::Parser;
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::io::AsyncReadExt;
+use tokio::signal;
+use tracing::{debug, error, info, warn};
 
-use tokio::sync::broadcast;
-use tracing::{debug, info, warn};
+// ─── Platform Constants ─────────────────────────────────────────────────────
+
+/// macOS utun interfaces prepend a 4-byte address family header
+/// to every packet. Linux TUN (with PI disabled) gives raw IP.
+#[cfg(target_os = "macos")]
+const TUN_AF_HEADER_LEN: usize = 4;
+
+#[cfg(target_os = "linux")]
+const TUN_AF_HEADER_LEN: usize = 0;
+
+// Fallback for other platforms during development
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+const TUN_AF_HEADER_LEN: usize = 0;
+
+/// Buffer size: MTU (1420) + TUN header (4) + headroom (128).
+/// Rounded up. Never allocate per-packet.
+const PACKET_BUF_SIZE: usize = 2048;
 
 // ─── Protocol Classification ────────────────────────────────────────────────
 
@@ -174,10 +195,15 @@ impl PacketInfo {
 // ─── Pipeline Statistics ────────────────────────────────────────────────────
 
 /// Atomic pipeline statistics for lock-free concurrent updates.
+/// Using atomics so the stats reporter task doesn't block the hot path.
 pub struct PipelineStats {
     pub packets_in: AtomicU64,
     pub bytes_in: AtomicU64,
+    pub ipv4_packets: AtomicU64,
+    pub ipv6_packets: AtomicU64,
     pub packets_dropped: AtomicU64,
+    pub dropped_runt: AtomicU64,
+    pub dropped_unknown: AtomicU64,
     pub parse_errors: AtomicU64,
 }
 
@@ -186,7 +212,11 @@ impl PipelineStats {
         Self {
             packets_in: AtomicU64::new(0),
             bytes_in: AtomicU64::new(0),
+            ipv4_packets: AtomicU64::new(0),
+            ipv6_packets: AtomicU64::new(0),
             packets_dropped: AtomicU64::new(0),
+            dropped_runt: AtomicU64::new(0),
+            dropped_unknown: AtomicU64::new(0),
             parse_errors: AtomicU64::new(0),
         }
     }
@@ -208,9 +238,28 @@ impl PipelineStats {
         StatsSnapshot {
             packets_in: self.packets_in.load(Ordering::Relaxed),
             bytes_in: self.bytes_in.load(Ordering::Relaxed),
+            ipv4_packets: self.ipv4_packets.load(Ordering::Relaxed),
+            ipv6_packets: self.ipv6_packets.load(Ordering::Relaxed),
             packets_dropped: self.packets_dropped.load(Ordering::Relaxed),
+            dropped_runt: self.dropped_runt.load(Ordering::Relaxed),
+            dropped_unknown: self.dropped_unknown.load(Ordering::Relaxed),
             parse_errors: self.parse_errors.load(Ordering::Relaxed),
         }
+    }
+
+    /// Log a periodic stats report.
+    pub fn report(&self) {
+        let snap = self.snapshot();
+        info!(
+            "📊 Pipeline Stats | packets: {} | bytes: {} | IPv4: {} | IPv6: {} | dropped: {} (runt: {}, unknown: {})",
+            snap.packets_in,
+            snap.bytes_in,
+            snap.ipv4_packets,
+            snap.ipv6_packets,
+            snap.packets_dropped,
+            snap.dropped_runt,
+            snap.dropped_unknown,
+        );
     }
 }
 
@@ -225,7 +274,11 @@ impl Default for PipelineStats {
 pub struct StatsSnapshot {
     pub packets_in: u64,
     pub bytes_in: u64,
+    pub ipv4_packets: u64,
+    pub ipv6_packets: u64,
     pub packets_dropped: u64,
+    pub dropped_runt: u64,
+    pub dropped_unknown: u64,
     pub parse_errors: u64,
 }
 
@@ -233,8 +286,9 @@ impl fmt::Display for StatsSnapshot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "packets_in={} bytes_in={} dropped={} parse_errors={}",
-            self.packets_in, self.bytes_in, self.packets_dropped, self.parse_errors
+            "packets_in={} bytes_in={} ipv4={} ipv6={} dropped={} runt={} unknown={} parse_errors={}",
+            self.packets_in, self.bytes_in, self.ipv4_packets, self.ipv6_packets,
+            self.packets_dropped, self.dropped_runt, self.dropped_unknown, self.parse_errors
         )
     }
 }
@@ -263,6 +317,11 @@ pub fn process_packet(data: &[u8], stats: &PipelineStats) {
 
     match PacketInfo::parse(data) {
         Some(info) => {
+            match info.version {
+                IpVersion::V4 => { stats.ipv4_packets.fetch_add(1, Ordering::Relaxed); }
+                IpVersion::V6 => { stats.ipv6_packets.fetch_add(1, Ordering::Relaxed); }
+            };
+
             debug!(
                 version = ?info.version,
                 proto = %info.protocol,
@@ -271,11 +330,19 @@ pub fn process_packet(data: &[u8], stats: &PipelineStats) {
                 payload_len = info.payload_len,
                 "packet parsed"
             );
-            // FUTURE: Antibodies (Tier 1 bloom filter)
-            // FUTURE: Split Tunnel classify
-            // FUTURE: Traffic Shaper
-            // FUTURE: PQ-WG encrypt + UDP send
-            stats.record_drop(); // placeholder: currently all packets are logged and dropped
+
+            // ┌─────────────────────────────────────────┐
+            // │  FUTURE PIPELINE STAGES INSERT HERE:    │
+            // │                                         │
+            // │  1. antibodies.inspect(ip_packet)       │
+            // │  2. split_tunnel.classify(ip_packet)    │
+            // │  3. shaper.shape(ip_packet)             │
+            // │  4. tunnel.encrypt_and_send(ip_packet)  │
+            // └─────────────────────────────────────────┘
+
+            // Steel Thread: log and drop.
+            // Packets are consumed (not echoed back) to prevent loops.
+            stats.record_drop();
         }
         None => {
             warn!(len = data.len(), "malformed packet, could not parse");
@@ -298,56 +365,188 @@ pub fn is_root() -> bool {
     false
 }
 
+// ─── CLI Arguments ──────────────────────────────────────────────────────────
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "aegis-gateway",
+    about = "Aegis Quantum Gateway — PQC-backed network sentinel",
+    version
+)]
+struct Args {
+    /// Name of the TUN interface
+    #[arg(short, long, default_value = "aegis0")]
+    tun_name: String,
+
+    /// MTU for the tunnel interface (WireGuard standard: 1420)
+    #[arg(long, default_value_t = 1420)]
+    mtu: u16,
+
+    /// Internal VPN IP address for this device
+    #[arg(long, default_value = "10.0.0.1")]
+    address: String,
+
+    /// Peer (Sanctuary) IP address
+    #[arg(long, default_value = "10.0.0.254")]
+    peer: String,
+
+    /// Stats reporting interval in seconds (0 = disabled)
+    #[arg(long, default_value_t = 5)]
+    stats_interval: u64,
+}
+
+// ─── TUN Device Setup ───────────────────────────────────────────────────────
+
+/// Create and configure the TUN interface.
+/// Separated from main() for clarity and future retry/platform workarounds.
+fn create_tun_config(args: &Args) -> anyhow::Result<tun2::Configuration> {
+    let mut config = tun2::Configuration::default();
+
+    let addr: Ipv4Addr = args
+        .address
+        .parse()
+        .map_err(|e| anyhow::anyhow!("Invalid --address '{}': {}", args.address, e))?;
+    let peer: Ipv4Addr = args
+        .peer
+        .parse()
+        .map_err(|e| anyhow::anyhow!("Invalid --peer '{}': {}", args.peer, e))?;
+
+    config
+        .address(addr)
+        .destination(peer)
+        .netmask((255, 255, 255, 0))
+        .mtu(args.mtu)
+        .up();
+
+    config.tun_name(&args.tun_name);
+
+    Ok(config)
+}
+
 // ─── Main Entry Point ───────────────────────────────────────────────────────
 
 #[tokio::main]
-async fn main() {
-    // Initialize structured logging with env-filter
+async fn main() -> anyhow::Result<()> {
+    // ── 1. Initialize structured logging with env-filter ──
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                .unwrap_or_else(|_| "aegis_gateway=info".into()),
         )
+        .with_target(false)
         .init();
+
+    let args = Args::parse();
 
     info!("Aegis Gateway (The Sentinel) starting...");
 
-    // Root privilege detection
+    // ── 2. Check privileges ──
     #[cfg(unix)]
     {
         if is_root() {
             info!("running with root privileges — TUN creation available");
         } else {
-            warn!(
-                "not running as root — TUN device creation requires CAP_NET_ADMIN or root"
-            );
+            error!("Aegis Gateway requires root privileges to create TUN interfaces.");
+            error!("Run with: sudo cargo run -p aegis-gateway");
+            std::process::exit(1);
         }
     }
 
+    // ── 3. Create TUN device ──
+    let config = create_tun_config(&args)?;
+    let dev = tun2::create_as_async(&config)
+        .map_err(|e| anyhow::anyhow!(
+            "Failed to create TUN device '{}': {}. \
+             Ensure no other process is using this device name and that \
+             the TUN kernel module is loaded (Linux: modprobe tun).",
+            args.tun_name, e
+        ))?;
+
+    info!("🛡️  Aegis TUN interface '{}' created", args.tun_name);
+    info!("   Address: {} → Peer: {}", args.address, args.peer);
+    info!("   MTU: {} bytes", args.mtu);
+
+    // ── 4. Shared state ──
     let stats = Arc::new(PipelineStats::new());
+    let running = Arc::new(AtomicBool::new(true));
 
-    // Graceful shutdown via Ctrl+C
-    let (shutdown_tx, mut shutdown_rx) = broadcast::channel::<()>(1);
+    // ── 5. Spawn stats reporter ──
+    if args.stats_interval > 0 {
+        let stats_clone = Arc::clone(&stats);
+        let running_clone = Arc::clone(&running);
+        let interval = std::time::Duration::from_secs(args.stats_interval);
 
-    let stats_clone = Arc::clone(&stats);
-    let shutdown_handle = tokio::spawn(async move {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to listen for ctrl+c");
-        info!("shutdown signal received, cleaning up...");
-        let _ = shutdown_tx.send(());
-        let snap = stats_clone.snapshot();
-        info!(%snap, "final pipeline statistics");
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.tick().await; // Skip the first immediate tick
+            while running_clone.load(Ordering::Relaxed) {
+                ticker.tick().await;
+                stats_clone.report();
+            }
+        });
+    }
+
+    // ── 6. Spawn graceful shutdown handler ──
+    let running_clone = Arc::clone(&running);
+    tokio::spawn(async move {
+        signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
+        info!("🛑 Shutdown signal received. Tearing down...");
+        running_clone.store(false, Ordering::SeqCst);
     });
 
-    info!("gateway pipeline ready (TUN device requires root — run with sudo)");
-    info!("press Ctrl+C to shut down");
+    // ── 7. Packet processing pipeline ──
+    info!("🚀 Quantum Pipeline active. Waiting for packets...");
+    info!("   Test with: ping -c 4 {}", args.peer);
 
-    // Wait for shutdown signal
-    let _ = shutdown_rx.recv().await;
-    let _ = shutdown_handle.await;
+    // Split device for future concurrent read/write
+    let (mut reader, _writer) = tokio::io::split(dev);
 
-    info!("Aegis Gateway shut down cleanly");
+    // Pre-allocated buffer — reused every iteration, zero per-packet allocation
+    let mut buf = [0u8; PACKET_BUF_SIZE];
+
+    while running.load(Ordering::Relaxed) {
+        // Use tokio::select! so we can check the running flag
+        // even if read() is blocked waiting for a packet
+        let read_result = tokio::select! {
+            result = reader.read(&mut buf) => result,
+            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                continue; // Re-check running flag
+            }
+        };
+
+        match read_result {
+            Ok(n) if n > TUN_AF_HEADER_LEN => {
+                // Strip platform-specific TUN header
+                let ip_packet = &buf[TUN_AF_HEADER_LEN..n];
+
+                // Process the packet through the pipeline
+                process_packet(ip_packet, &stats);
+            }
+            Ok(n) => {
+                stats.dropped_runt.fetch_add(1, Ordering::Relaxed);
+                debug!("Runt packet: {} bytes, dropping", n);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                continue;
+            }
+            Err(e) => {
+                error!("TUN read error: {}", e);
+                break;
+            }
+        }
+    }
+
+    // ── 8. Cleanup ──
+    info!("🧹 Final statistics:");
+    stats.report();
+    info!("🛡️  Aegis Gateway shut down cleanly.");
+
+    // The TUN device is dropped here, which closes the file descriptor.
+    // On Linux, this automatically removes the TUN interface.
+    // On macOS, utun interfaces are cleaned up by the kernel when the
+    // controlling socket is closed.
+
+    Ok(())
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -499,6 +698,22 @@ mod tests {
         assert_eq!(snap.packets_in, 1);
         assert_eq!(snap.packets_dropped, 1); // currently all are dropped
         assert_eq!(snap.parse_errors, 0);
+        assert_eq!(snap.ipv4_packets, 1);
+        assert_eq!(snap.ipv6_packets, 0);
+    }
+
+    #[test]
+    fn process_packet_valid_ipv6() {
+        let stats = PipelineStats::new();
+        let src = [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let dst = [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        let pkt = make_ipv6_packet(17, src, dst, &[0; 8]);
+        process_packet(&pkt, &stats);
+        let snap = stats.snapshot();
+        assert_eq!(snap.packets_in, 1);
+        assert_eq!(snap.packets_dropped, 1);
+        assert_eq!(snap.ipv4_packets, 0);
+        assert_eq!(snap.ipv6_packets, 1);
     }
 
     #[test]
@@ -528,5 +743,47 @@ mod tests {
         let s = format!("{}", snap);
         assert!(s.contains("packets_in=1"));
         assert!(s.contains("bytes_in=42"));
+    }
+
+    #[test]
+    fn tun_af_header_len_platform() {
+        // On Linux CI, this should be 0; on macOS it would be 4
+        #[cfg(target_os = "linux")]
+        assert_eq!(TUN_AF_HEADER_LEN, 0);
+
+        #[cfg(target_os = "macos")]
+        assert_eq!(TUN_AF_HEADER_LEN, 4);
+    }
+
+    #[test]
+    fn stats_ipv4_ipv6_counters() {
+        let stats = PipelineStats::new();
+
+        // IPv4 ICMP
+        let pkt4 = make_ipv4_packet(1, [10, 0, 0, 1], [10, 0, 0, 254], &[0; 8]);
+        process_packet(&pkt4, &stats);
+
+        // IPv6 TCP
+        let src6 = [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let dst6 = [0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        let pkt6 = make_ipv6_packet(6, src6, dst6, &[0; 20]);
+        process_packet(&pkt6, &stats);
+
+        let snap = stats.snapshot();
+        assert_eq!(snap.packets_in, 2);
+        assert_eq!(snap.ipv4_packets, 1);
+        assert_eq!(snap.ipv6_packets, 1);
+        assert_eq!(snap.packets_dropped, 2);
+    }
+
+    #[test]
+    fn stats_runt_and_unknown_counters() {
+        let stats = PipelineStats::new();
+        stats.dropped_runt.fetch_add(1, Ordering::Relaxed);
+        stats.dropped_unknown.fetch_add(2, Ordering::Relaxed);
+
+        let snap = stats.snapshot();
+        assert_eq!(snap.dropped_runt, 1);
+        assert_eq!(snap.dropped_unknown, 2);
     }
 }
