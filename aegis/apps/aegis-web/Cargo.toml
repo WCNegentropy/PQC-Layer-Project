@@ -1,0 +1,11 @@
+[package]
+name = "aegis-web"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+aegis-crypto = { path = "../../crates/aegis-crypto" }
+aegis-platform = { path = "../../crates/aegis-platform" }

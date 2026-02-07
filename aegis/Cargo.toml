@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "crates/aegis-crypto",
+    "crates/aegis-gateway",
+    "crates/aegis-platform",
+    "crates/aegis-identity",
+    "crates/aegis-vault",
+    "crates/aegis-social",
+    "crates/aegis-sanctuary",
+    "apps/aegis-desktop",
+    "apps/aegis-cli",
+    "apps/aegis-web",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["PQC Layer Project Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/WCNegentropy/PQC-Layer-Project"
+
+[workspace.dependencies]
+# Common dependencies can be defined here
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
