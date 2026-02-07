@@ -84,6 +84,9 @@ fn main() {
         Commands::Keygen { pubkey, privkey } => {
             println!("🔑 Generating hybrid keypair (X25519 + ML-KEM-768)...");
             let (pk, _sk) = aegis_crypto::AegisCrypto::keygen();
+            // Note: _sk is HybridSecretKey which wraps both components in
+            // Zeroizing<>, so the secret key material is automatically wiped
+            // from memory when _sk is dropped at the end of this block.
             let pk_bytes = pk.to_bytes();
             println!("   Public key:  {} bytes → {pubkey}", pk_bytes.len());
             println!("   Private key: (zeroized in memory) → {privkey}");

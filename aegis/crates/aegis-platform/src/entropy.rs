@@ -42,7 +42,8 @@ mod tests {
         let entropy = OsEntropy;
         let bytes = entropy.random_bytes(32).unwrap();
         assert_eq!(bytes.len(), 32);
-        // Extremely unlikely to be all zeros
+        // Statistical check: probability of 32 zero bytes from CSPRNG is 2^-256,
+        // which is astronomically unlikely but technically non-deterministic.
         assert_ne!(bytes, vec![0u8; 32]);
     }
 

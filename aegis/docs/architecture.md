@@ -297,8 +297,11 @@ derive transport keys
 ### 7.3 Key Rotation
 
 Transport keys are rotated after 2^64 - 1 packets or a configurable time
-interval (default: 120 seconds), triggering a new handshake. This provides
-forward secrecy — compromising current keys does not reveal past traffic.
+interval (default: 120 seconds, matching WireGuard's `REKEY_AFTER_TIME`).
+This triggers a new handshake, providing forward secrecy — compromising
+current keys does not reveal past traffic. The 120-second default balances
+forward secrecy granularity against PQ-WG handshake overhead (hybrid KEM
+is ~10× slower than classical WireGuard).
 
 ---
 
