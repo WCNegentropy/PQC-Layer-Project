@@ -23,9 +23,16 @@ repository = "https://github.com/WCNegentropy/PQC-Layer-Project"
 
 [workspace.dependencies]
 # Common dependencies can be defined here
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# Use tun2 — actively maintained fork with reliable async support
+tun2 = { version = "4", features = ["async"] }
+bytes = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [profile.release]
 opt-level = 3
