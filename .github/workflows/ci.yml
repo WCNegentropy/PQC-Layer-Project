@@ -64,6 +64,24 @@ jobs:
       - run: cargo check --workspace --all-targets
         working-directory: aegis
 
+  miri:
+    name: Miri (undefined behavior detection)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: aegis
+      - name: Run Miri on aegis-crypto tests
+        run: cargo miri test -p aegis-crypto
+        working-directory: aegis
+        env:
+          MIRIFLAGS: -Zmiri-symbolic-alignment-check -Zmiri-retag-fields
+
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
