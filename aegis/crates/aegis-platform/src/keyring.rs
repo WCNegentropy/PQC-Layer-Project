@@ -39,6 +39,13 @@ pub struct MemoryKeyring {
 }
 
 #[cfg(test)]
+impl Default for MemoryKeyring {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
 impl MemoryKeyring {
     pub fn new() -> Self {
         Self {

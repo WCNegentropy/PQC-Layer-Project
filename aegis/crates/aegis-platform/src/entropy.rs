@@ -27,9 +27,8 @@ pub struct OsEntropy;
 
 impl EntropySource for OsEntropy {
     fn fill_bytes(&self, buf: &mut [u8]) -> Result<(), PlatformError> {
-        getrandom::getrandom(buf).map_err(|e| {
-            PlatformError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-        })
+        getrandom::getrandom(buf)
+            .map_err(|e| PlatformError::Io(std::io::Error::other(e.to_string())))
     }
 }
 
