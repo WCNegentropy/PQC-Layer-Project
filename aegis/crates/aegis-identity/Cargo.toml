@@ -5,5 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Identity anchor (Layer 4) — DIDs, key hierarchy, VCs, auth"
 
 [dependencies]
+thiserror = "1.0"

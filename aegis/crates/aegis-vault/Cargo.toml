@@ -5,5 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Data sovereignty vault (Layer 5) — encrypted storage, FUSE, sync"
 
 [dependencies]
+thiserror = "1.0"

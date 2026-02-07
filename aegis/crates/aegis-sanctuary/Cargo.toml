@@ -5,5 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Sanctuary node (server) — PQ-WG termination, NAT proxy"
 
 [dependencies]
+thiserror = "1.0"
