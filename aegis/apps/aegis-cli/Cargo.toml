@@ -5,7 +5,9 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Aegis command-line interface — aegis up/down/status"
 
 [dependencies]
 aegis-crypto = { path = "../../crates/aegis-crypto" }
 aegis-platform = { path = "../../crates/aegis-platform" }
+clap = { workspace = true }

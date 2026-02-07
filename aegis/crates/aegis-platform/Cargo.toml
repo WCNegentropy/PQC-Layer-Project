@@ -5,5 +5,8 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Platform abstraction layer (Layer 1) for Project Aegis"
 
 [dependencies]
+thiserror = "1.0"
+getrandom = "0.2"

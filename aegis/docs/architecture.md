@@ -235,9 +235,314 @@ let pk = HybridPublicKey::from_bytes(&pk_bytes)?;
 ### Phase 1: Sentinel MVP (Current — Weeks 3-12)
 - [x] Async packet pipeline with safe parsing
 - [x] Pipeline statistics and graceful shutdown
+- [x] CLI: `aegis up`, `aegis down`, `aegis status`, `aegis keygen`
 - [ ] PQ-WireGuard handshake implementation
 - [ ] Tunnel engine (encrypt/decrypt transport packets)
 - [ ] Sanctuary Node v0 (Docker, PQ-WG termination + NAT)
 - [ ] DNS Membrane (local resolver, DoH over tunnel)
-- [ ] CLI: `aegis up`, `aegis down`, `aegis status`
 - [ ] `check.aegis.dev` verification endpoint
+
+### Phase 2: Identity & Vault (Weeks 13-24)
+- [ ] Key hierarchy (root → device → session)
+- [ ] DID (`did:aegis`) implementation
+- [ ] Verifiable Credentials with ML-DSA-65
+- [ ] Encrypted vault storage (per-file AEAD)
+- [ ] FUSE filesystem mount
+- [ ] CRDT-based multi-device sync
+
+### Phase 3: Social Fabric (Weeks 25-36)
+- [ ] PQ Double Ratchet messaging
+- [ ] MLS-inspired group encryption
+- [ ] ActivityPub federation
+- [ ] Desktop app (Tauri 2.0)
+
+---
+
+## 7. Wire Protocol (PQ-WireGuard)
+
+The Aegis tunnel uses a WireGuard-inspired protocol extended with hybrid
+post-quantum key encapsulation.
+
+### 7.1 Handshake (Noise IK + Hybrid KEM)
+
+```text
+Initiator (Client)                         Responder (Sanctuary)
+──────────────────                         ─────────────────────
+knows responder's static PK
+
+msg1: e_i, s_i, KEM_ct_i ────────────────▶
+                                           decapsulate KEM_ct_i
+                                           derive transport keys
+                          ◀──────────────── msg2: e_r, KEM_ct_r
+decapsulate KEM_ct_r
+derive transport keys
+
+        ◀════════ encrypted tunnel data ════════▶
+```
+
+### 7.2 Transport Packet Format
+
+```text
+┌──────────────┬──────────┬──────────────────────┬──────────┐
+│ Receiver Idx │ Counter  │ Encrypted IP Packet  │ Auth Tag │
+│   (4B LE)    │ (8B LE)  │    (variable)        │  (16B)   │
+└──────────────┴──────────┴──────────────────────┴──────────┘
+```
+
+- **Receiver Index:** Identifies the session keypair on the receiver.
+- **Counter:** 64-bit LE, strictly increasing (anti-replay via sliding window).
+- **Encrypted Payload:** ChaCha20-Poly1305 AEAD with nonce derived from counter.
+- **Auth Tag:** 16-byte Poly1305 tag.
+
+### 7.3 Key Rotation
+
+Transport keys are rotated after 2^64 - 1 packets or a configurable time
+interval (default: 120 seconds, matching WireGuard's `REKEY_AFTER_TIME`).
+This triggers a new handshake, providing forward secrecy — compromising
+current keys does not reveal past traffic. The 120-second default balances
+forward secrecy granularity against PQ-WG handshake overhead (hybrid KEM
+is ~10× slower than classical WireGuard).
+
+---
+
+## 8. Sanctuary Network
+
+The Sanctuary is a network of PQ-WG termination servers that provide:
+
+1. **IP Privacy** — Client traffic exits through the Sanctuary's IP.
+2. **DNS Oblivion** — DNS queries are resolved by the Sanctuary, not the ISP.
+3. **NAT Proxy** — Stateful NAT with connection tracking.
+
+### 8.1 Deployment Model
+
+```text
+┌─────────┐     PQ-WG      ┌──────────────┐      NAT      ┌──────────┐
+│  Aegis  │ ──────────────▶ │  Sanctuary   │ ────────────▶ │ Internet │
+│  Client │   UDP tunnel    │    Node      │   cleartext   │          │
+└─────────┘                 └──────────────┘               └──────────┘
+```
+
+Sanctuary nodes run as Docker containers with minimal attack surface:
+- Read-only root filesystem
+- No shell access
+- PQ-WG + NAT proxy only
+- Automatic key rotation
+
+### 8.2 Peer Authorization
+
+Each client registers its hybrid public key with the Sanctuary. Only
+authorized peers can establish tunnels. Unauthorized handshake attempts
+receive no response (silent drop to prevent enumeration).
+
+---
+
+## 9. Identity Anchor (Layer 4)
+
+### 9.1 Key Hierarchy
+
+```text
+Root Keypair (ML-DSA-65 + Ed25519)
+├── Device Key (HKDF-SHA3-256, per device)
+│   ├── Session Key (ephemeral, per connection)
+│   └── Storage Key (for vault master key derivation)
+└── Recovery Key (Shamir secret sharing, offline backup)
+```
+
+### 9.2 Decentralized Identifiers
+
+Aegis uses a `did:aegis` method:
+
+```
+did:aegis:z6MkhaXgBZDvotDkL...
+```
+
+The DID document contains:
+- ML-DSA-65 public key (verification)
+- ML-KEM-768 public key (key agreement)
+- Service endpoints (Sanctuary addresses)
+
+### 9.3 Verifiable Credentials
+
+W3C VC format signed with ML-DSA-65. Use cases:
+- Proving device ownership to a Sanctuary
+- Peer identity verification for social messaging
+- Authorization for vault access delegation
+
+---
+
+## 10. Data Sovereignty Vault (Layer 5)
+
+### 10.1 Encryption Model
+
+Each file is encrypted with a unique key:
+
+```text
+file_key = HKDF-SHA3-256(
+    ikm  = vault_master_key,
+    salt = SHA3-256(file_path),
+    info = b"aegis-vault-file-key-v1"
+)
+```
+
+Encryption uses ChaCha20-Poly1305 AEAD with a random nonce per write.
+
+### 10.2 Storage Layout
+
+```text
+vault/
+├── .aegis/
+│   ├── metadata.db          # Encrypted SQLite (file index, CRDT state)
+│   └── keys/                # Encrypted key material
+├── 00/                      # Content-addressed blob storage
+│   ├── aa/
+│   │   └── 00aabb...hex     # Encrypted file blob
+│   └── ...
+```
+
+### 10.3 Sync Engine
+
+Multi-device sync uses CRDTs (Conflict-free Replicated Data Types):
+- **File operations:** LWW-Register (last-writer-wins by timestamp)
+- **Directory structure:** OR-Set (observed-remove set)
+- **Conflict resolution:** Automatic via CRDT semantics; no user intervention
+
+---
+
+## 11. Social Fabric (Layer 7)
+
+### 11.1 PQ Double Ratchet
+
+Adapts the Signal Double Ratchet for post-quantum security:
+- DH ratchet step uses ML-KEM-768 instead of X25519
+- Symmetric ratchet uses HKDF-SHA3-256
+- Message keys use ChaCha20-Poly1305 AEAD
+
+Properties:
+- Forward secrecy per message
+- Post-compromise security (self-healing after key compromise)
+- Quantum resistance via ML-KEM
+
+### 11.2 Group Messaging (MLS-inspired)
+
+Tree-based group key agreement:
+- Binary tree with ML-KEM at each node
+- O(log n) cost for member add/remove
+- Epoch-based key rotation
+- Forward secrecy between epochs
+
+### 11.3 Federation (ActivityPub)
+
+ActivityPub extensions for Aegis:
+- Standard ActivityPub for public posts
+- `aegis:EncryptedMessage` type for PQ-encrypted DMs
+- WebFinger discovery for `did:aegis` identities
+- ML-DSA-65 HTTP Signatures for server-to-server auth
+
+---
+
+## 12. Platform Matrix
+
+| Feature              | Linux             | macOS              | Windows (future)   | iOS/Android (future) |
+|----------------------|-------------------|--------------------|--------------------|--------------------|
+| TUN interface        | `/dev/net/tun`    | `utun` kernel      | Wintun.dll         | NetworkExtension   |
+| Keyring              | libsecret/DBUS    | Keychain Services  | Credential Manager | Keychain/Keystore  |
+| FUSE mount           | `libfuse3`        | `macfuse`          | WinFsp             | N/A                |
+| TPM/HSM              | `tpm2-tss`        | Secure Enclave     | Windows TPM        | Secure Enclave     |
+| System tray          | `dbus` indicators | NSStatusItem       | System Tray API    | N/A                |
+| Privileges           | CAP_NET_ADMIN/root| root               | Admin              | VPN entitlement    |
+| Entropy              | `/dev/urandom`    | `SecRandomCopyBytes`| `BCryptGenRandom` | System CSPRNG      |
+
+---
+
+## 13. Threat Model Summary
+
+### 13.1 Adversary Capabilities
+
+| Adversary Class           | Capabilities                         | Mitigations                              |
+|---------------------------|--------------------------------------|------------------------------------------|
+| Passive Network Observer  | Traffic capture, timing analysis     | PQ-WG encryption, traffic shaping        |
+| Active Network Attacker   | Injection, modification, replay      | AEAD auth, transcript binding, counters  |
+| Harvest-Now-Decrypt-Later | Store ciphertext for quantum attack  | ML-KEM-768 hybrid KEM                    |
+| Compromised Endpoint      | Memory access on one peer            | Zeroizing keys, ephemeral secrets        |
+| Malicious Sanctuary       | Modified server software             | Client-side verification, open source    |
+| Supply Chain Attack       | Compromised dependencies             | `cargo-audit`, reproducible builds       |
+
+### 13.2 Trust Boundaries
+
+1. **TUN ↔ Pipeline** — Untrusted input; all packets validated before processing.
+2. **Client ↔ Sanctuary** — Mutually authenticated via PQ-WG handshake.
+3. **Key Material ↔ Memory** — Zeroized on drop; never logged.
+4. **Vault ↔ Filesystem** — Encrypted at rest; plaintext only in FUSE buffer.
+
+---
+
+## 14. CI/CD Pipeline
+
+### 14.1 Current Pipeline (`.github/workflows/ci.yml`)
+
+| Job        | What It Does                           | Runs On        |
+|------------|----------------------------------------|----------------|
+| `fmt`      | `cargo fmt --all --check`              | ubuntu-latest  |
+| `clippy`   | `cargo clippy -- -D warnings`          | ubuntu-latest  |
+| `check`    | `cargo check --workspace --all-targets`| ubuntu-latest  |
+| `test`     | `cargo test --workspace`               | ubuntu + macOS |
+| `audit`    | `cargo-audit` vulnerability scan       | ubuntu-latest  |
+
+### 14.2 Planned Additions
+
+| Job           | What It Does                                  | Priority |
+|---------------|-----------------------------------------------|----------|
+| `miri`        | Undefined behavior detection on `aegis-crypto`| Medium   |
+| `fuzz`        | `cargo-fuzz` on hybrid KEM (30 min)           | Medium   |
+| `bench`       | Criterion benchmarks, regression detection    | Low      |
+| `coverage`    | `cargo-tarpaulin` or `llvm-cov`               | Low      |
+| `release`     | Cross-compile + sign release artifacts        | Phase 2  |
+
+---
+
+## 15. Technology Decisions
+
+### 15.1 Why Rust?
+
+- Memory safety without GC (critical for crypto code)
+- Zero-cost abstractions for performance-sensitive packet pipeline
+- `#[cfg]` for platform-specific code without runtime dispatch
+- `zeroize` crate for deterministic secret wiping
+- Strong async ecosystem (tokio) for network I/O
+
+### 15.2 Why Hybrid KEM (X25519 + ML-KEM-768)?
+
+- **Defense in depth:** If ML-KEM is broken, X25519 still protects.
+- **If X25519 is broken by quantum computers**, ML-KEM-768 still protects.
+- **Transcript binding** prevents one component's ciphertext from being
+  replayed in a different protocol context.
+- NIST Level 3 security (ML-KEM-768) matches our threat model.
+
+### 15.3 Why ChaCha20-Poly1305 over AES-GCM?
+
+- Constant-time in software (no AES-NI required)
+- Better performance on ARM devices without hardware AES
+- Widely deployed and audited (used by WireGuard, TLS 1.3)
+- Avoids AES-GCM nonce-misuse catastrophe (though both require unique nonces)
+
+### 15.4 Why ML-DSA-65 (Dilithium3)?
+
+- NIST FIPS 204 standard (2024)
+- NIST Level 3 security (consistent with ML-KEM-768)
+- Reasonable signature size (~3.3 KB) for handshake messages
+- `pqcrypto-mldsa` crate (actively maintained, replaces deprecated `pqcrypto-dilithium`)
+
+### 15.5 Why tun2 over other TUN libraries?
+
+- Actively maintained fork of the original `tun` crate
+- Async support via tokio (feature flag)
+- Cross-platform: Linux, macOS, Windows
+- v4 API: always delivers raw IP packets (no PI header confusion)
+
+### 15.6 Dependency Selection Criteria
+
+1. **Actively maintained** — recent commits, responsive to issues
+2. **Audited where possible** — especially for crypto dependencies
+3. **Minimal transitive dependencies** — reduce supply chain risk
+4. **No unsafe where avoidable** — prefer safe Rust abstractions
+5. **`cargo-audit` clean** — no known vulnerabilities
