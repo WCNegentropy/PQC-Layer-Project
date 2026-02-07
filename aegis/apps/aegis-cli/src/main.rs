@@ -2,12 +2,12 @@
 //!
 //! Command-line interface for the Aegis platform.
 
-use aegis_crypto;
-use aegis_platform;
+use aegis_crypto::init as crypto_init;
+use aegis_platform::init as platform_init;
 
 fn main() {
     println!("Aegis CLI");
-    aegis_crypto::init();
-    aegis_platform::init();
+    crypto_init();
+    platform_init();
     println!("Ready for commands");
 }

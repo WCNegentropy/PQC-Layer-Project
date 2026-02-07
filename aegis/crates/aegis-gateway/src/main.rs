@@ -2,10 +2,10 @@
 //!
 //! The gateway service for the Aegis platform, handling routing and access control.
 
-use aegis_crypto;
+use aegis_crypto::init;
 
 fn main() {
     println!("Starting Aegis Gateway...");
-    aegis_crypto::init();
+    init();
     println!("Aegis Gateway initialized successfully");
 }
