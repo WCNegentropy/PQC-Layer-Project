@@ -251,14 +251,14 @@ impl PipelineStats {
     pub fn report(&self) {
         let snap = self.snapshot();
         info!(
-            "📊 Pipeline Stats | packets: {} | bytes: {} | IPv4: {} | IPv6: {} | runt: {} | unknown: {} | dropped: {}",
+            "📊 Pipeline Stats | packets: {} | bytes: {} | IPv4: {} | IPv6: {} | dropped: {} (runt: {}, unknown: {})",
             snap.packets_in,
             snap.bytes_in,
             snap.ipv4_packets,
             snap.ipv6_packets,
+            snap.packets_dropped,
             snap.dropped_runt,
             snap.dropped_unknown,
-            snap.packets_dropped,
         );
     }
 }
@@ -399,17 +399,17 @@ struct Args {
 
 /// Create and configure the TUN interface.
 /// Separated from main() for clarity and future retry/platform workarounds.
-fn create_tun_config(args: &Args) -> tun2::Configuration {
+fn create_tun_config(args: &Args) -> anyhow::Result<tun2::Configuration> {
     let mut config = tun2::Configuration::default();
 
     let addr: Ipv4Addr = args
         .address
         .parse()
-        .expect("Invalid --address: must be IPv4 like 10.0.0.1");
+        .map_err(|e| anyhow::anyhow!("Invalid --address '{}': {}", args.address, e))?;
     let peer: Ipv4Addr = args
         .peer
         .parse()
-        .expect("Invalid --peer: must be IPv4 like 10.0.0.254");
+        .map_err(|e| anyhow::anyhow!("Invalid --peer '{}': {}", args.peer, e))?;
 
     config
         .address(addr)
@@ -420,7 +420,7 @@ fn create_tun_config(args: &Args) -> tun2::Configuration {
 
     config.tun_name(&args.tun_name);
 
-    config
+    Ok(config)
 }
 
 // ─── Main Entry Point ───────────────────────────────────────────────────────
@@ -453,9 +453,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── 3. Create TUN device ──
-    let config = create_tun_config(&args);
+    let config = create_tun_config(&args)?;
     let dev = tun2::create_as_async(&config)
-        .map_err(|e| anyhow::anyhow!("Failed to create TUN device '{}': {}", args.tun_name, e))?;
+        .map_err(|e| anyhow::anyhow!(
+            "Failed to create TUN device '{}': {}. \
+             Ensure no other process is using this device name and that \
+             the TUN kernel module is loaded (Linux: modprobe tun).",
+            args.tun_name, e
+        ))?;
 
     info!("🛡️  Aegis TUN interface '{}' created", args.tun_name);
     info!("   Address: {} → Peer: {}", args.address, args.peer);
