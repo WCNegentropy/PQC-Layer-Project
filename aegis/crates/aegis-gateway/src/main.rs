@@ -295,16 +295,18 @@ impl fmt::Display for StatsSnapshot {
 
 // ─── macOS TUN AF Header ────────────────────────────────────────────────────
 
-/// macOS TUN devices prepend a 4-byte address family header.
-/// AF_INET = 2 (IPv4), AF_INET6 = 30 (IPv6).
-const TUN_AF_HEADER_SIZE: usize = 4;
+/// Size of the macOS utun 4-byte address family header (AF_INET=2, AF_INET6=30).
+/// This is always 4 bytes on macOS regardless of platform, since this function
+/// is specifically for parsing macOS AF headers.
+const MACOS_AF_HEADER_SIZE: usize = 4;
 
 /// Strip the macOS 4-byte AF header from a TUN packet, returning the raw IP payload.
+/// This is specifically for macOS utun interfaces and always expects a 4-byte header.
 pub fn strip_af_header(data: &[u8]) -> Option<&[u8]> {
-    if data.len() <= TUN_AF_HEADER_SIZE {
+    if data.len() <= MACOS_AF_HEADER_SIZE {
         return None;
     }
-    Some(&data[TUN_AF_HEADER_SIZE..])
+    Some(&data[MACOS_AF_HEADER_SIZE..])
 }
 
 // ─── Pipeline Processing ────────────────────────────────────────────────────
@@ -419,6 +421,14 @@ fn create_tun_config(args: &Args) -> anyhow::Result<tun2::Configuration> {
         .up();
 
     config.tun_name(&args.tun_name);
+
+    // Explicitly disable packet information on Linux to ensure raw IP packets
+    // (no 4-byte PI header). tun2 v4 defaults PI to false on Linux, but being
+    // explicit prevents breakage if the default ever changes.
+    #[cfg(target_os = "linux")]
+    config.platform_config(|platform| {
+        platform.packet_information(false);
+    });
 
     Ok(config)
 }

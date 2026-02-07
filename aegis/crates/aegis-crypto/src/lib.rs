@@ -12,7 +12,8 @@
 use hkdf::Hkdf;
 use pqcrypto_kyber::kyber768;
 use pqcrypto_traits::kem::{
-    Ciphertext as KemCiphertext, PublicKey as KemPublicKey, SharedSecret as KemSharedSecret,
+    Ciphertext as KemCiphertext, PublicKey as KemPublicKey, SecretKey as KemSecretKey,
+    SharedSecret as KemSharedSecret,
 };
 use sha3::{Digest, Sha3_256};
 use thiserror::Error;
@@ -34,7 +35,7 @@ pub const HYBRID_PK_SIZE: usize = X25519_PK_SIZE + MLKEM_PK_SIZE;
 pub const HYBRID_CT_SIZE: usize = X25519_EPH_SIZE + MLKEM_CT_SIZE;
 
 /// Label used in transcript binding for domain separation.
-const TRANSCRIPT_LABEL: &[u8] = b"aegis-hybrid-kem-v1";
+const TRANSCRIPT_LABEL: &[u8] = b"aegis-hybrid-kem-v1-transcript";
 /// Info string for HKDF expand.
 const HKDF_INFO: &[u8] = b"aegis-hybrid-kem-v1";
 
@@ -86,9 +87,32 @@ impl HybridPublicKey {
 }
 
 /// A hybrid secret key combining X25519 and ML-KEM-768.
+///
+/// Both components are wrapped for zeroize-on-drop:
+/// - `x25519` is wrapped in `Zeroizing<StaticSecret>` (StaticSecret implements Zeroize but not ZeroizeOnDrop).
+/// - `ml_kem_bytes` stores the raw key bytes in `Zeroizing<Vec<u8>>` since `pqcrypto`'s `SecretKey`
+///   does not implement Zeroize. The key is reconstructed on demand via `ml_kem_key()`.
 pub struct HybridSecretKey {
-    x25519: StaticSecret,
-    ml_kem: kyber768::SecretKey,
+    x25519: Zeroizing<StaticSecret>,
+    ml_kem_bytes: Zeroizing<Vec<u8>>,
+}
+
+impl HybridSecretKey {
+    /// Create a new hybrid secret key, converting the ML-KEM key to zeroizing bytes.
+    fn new(x25519: StaticSecret, ml_kem: kyber768::SecretKey) -> Self {
+        Self {
+            x25519: Zeroizing::new(x25519),
+            ml_kem_bytes: Zeroizing::new(ml_kem.as_bytes().to_vec()),
+        }
+    }
+
+    /// Reconstruct the ML-KEM secret key from stored bytes.
+    fn ml_kem_key(&self) -> Result<kyber768::SecretKey, CryptoError> {
+        kyber768::SecretKey::from_bytes(&self.ml_kem_bytes).map_err(|_| CryptoError::InvalidLength {
+            expected: self.ml_kem_bytes.len(),
+            got: self.ml_kem_bytes.len(),
+        })
+    }
 }
 
 /// A hybrid ciphertext combining X25519 ephemeral public key and ML-KEM-768 ciphertext.
@@ -157,10 +181,7 @@ impl AegisCrypto {
                 x25519: x25519_public,
                 ml_kem: ml_kem_pk,
             },
-            HybridSecretKey {
-                x25519: x25519_secret,
-                ml_kem: ml_kem_sk,
-            },
+            HybridSecretKey::new(x25519_secret, ml_kem_sk),
         )
     }
 
@@ -210,7 +231,8 @@ impl AegisCrypto {
             .diffie_hellman(&ciphertext.x25519_ephemeral);
 
         // ML-KEM-768: decapsulate (implicit rejection on bad ciphertext)
-        let ml_kem_ss = kyber768::decapsulate(&ciphertext.ml_kem_ct, &secret_key.ml_kem);
+        let ml_kem_sk = secret_key.ml_kem_key()?;
+        let ml_kem_ss = kyber768::decapsulate(&ciphertext.ml_kem_ct, &ml_kem_sk);
 
         // Combine with same transcript binding
         Self::derive_hybrid_secret(
