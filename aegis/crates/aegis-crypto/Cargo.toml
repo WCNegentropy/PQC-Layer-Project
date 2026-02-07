@@ -1,0 +1,10 @@
+[package]
+name = "aegis-crypto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Add crypto-specific dependencies here
