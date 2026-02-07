@@ -4,39 +4,71 @@ Welcome to the Aegis platform documentation.
 
 ## Project Overview
 
-Aegis is a Post-Quantum Cryptography (PQC) encrypted digital layer for user data ownership, sovereignty, and security.
+Aegis is a **layered, modular platform** providing individuals with quantum-resistant
+control over their data, identity, and communications. It uses hybrid post-quantum
+cryptography (X25519 + ML-KEM-768) to defend against both classical and quantum adversaries.
+
+## Documentation Index
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](architecture.md) | Full system architecture, wire protocol, deployment model |
+| [Cryptography](cryptography.md) | Algorithm suite, hybrid KEM construction, key zeroization |
+| [Threat Model](threat-model.md) | Adversary capabilities, trust boundaries, mitigations |
+| [Protocol Spec](protocol-spec.md) | PQ-WireGuard wire protocol, transport format |
 
 ## Architecture
 
-The project is organized as a Rust workspace with the following components:
+The project is organized as a 7-layer Rust workspace:
 
-### Core Crates
-- **aegis-crypto**: Cryptographic primitives and PQC implementations
-- **aegis-gateway**: Gateway service for routing and access control
-- **aegis-platform**: Core platform functionality
-- **aegis-identity**: Identity and authentication management
-- **aegis-vault**: Secure data storage and retrieval
-- **aegis-social**: Social networking features
-- **aegis-sanctuary**: Secure communication and collaboration
+### Core Crates (Layers)
+| Crate | Layer | Description | Status |
+|-------|-------|-------------|--------|
+| `aegis-platform` | L1 | TUN/Keyring/Entropy/FS traits | Trait definitions |
+| `aegis-crypto` | L2 | Hybrid KEM, AEAD, ML-DSA-65 signatures | ✅ Implemented |
+| `aegis-gateway` | L3 | TUN device, async packet pipeline | ✅ Implemented |
+| `aegis-identity` | L4 | DIDs, key hierarchy, VCs, auth | Module stubs |
+| `aegis-vault` | L5 | Encrypted storage, FUSE, CRDT sync | Module stubs |
+| `aegis-social` | L7 | PQ messaging, groups, federation | Module stubs |
+| `aegis-sanctuary` | — | PQ-WG server, NAT proxy | Module stubs |
 
 ### Applications
-- **aegis-desktop**: Desktop client application
-- **aegis-cli**: Command-line interface
-- **aegis-web**: Web-based interface
+| App | Description | Status |
+|-----|-------------|--------|
+| `aegis-cli` | CLI: `aegis up/down/status/keygen` | ✅ Commands defined |
+| `aegis-desktop` | Tauri 2.0 desktop app | Placeholder |
+| `aegis-web` | Axum web server | Placeholder |
 
 ## Getting Started
 
 ```bash
 # Build all crates
+cd aegis
 cargo build
 
-# Run tests
-cargo test
+# Run tests (50 tests across the workspace)
+cargo test --workspace
 
-# Run a specific application
-cargo run -p aegis-cli
+# Use the CLI
+cargo run -p aegis-cli -- status
+cargo run -p aegis-cli -- keygen
+
+# Run the gateway (requires root)
+sudo cargo run -p aegis-gateway -- --tun-name aegis0
 ```
 
 ## Development
+
+```bash
+# Format check
+cargo fmt --all --check
+
+# Lint
+cargo clippy --all-targets -- -D warnings
+
+# Run fuzz tests (requires nightly)
+cd crates/aegis-crypto
+cargo +nightly fuzz run fuzz_kem_deser -- -max_total_time=60
+```
 
 For development guidelines and contribution instructions, see the main repository README.
