@@ -59,13 +59,15 @@ async fn main() -> anyhow::Result<()> {
 
     // ── 3. Create TUN device ──
     let config = create_tun_config(&args)?;
-    let dev = tun2::create_as_async(&config)
-        .map_err(|e| anyhow::anyhow!(
+    let dev = tun2::create_as_async(&config).map_err(|e| {
+        anyhow::anyhow!(
             "Failed to create TUN device '{}': {}. \
              Ensure no other process is using this device name and that \
              the TUN kernel module is loaded (Linux: modprobe tun).",
-            args.tun_name, e
-        ))?;
+            args.tun_name,
+            e
+        )
+    })?;
 
     info!("🛡️  Aegis TUN interface '{}' created", args.tun_name);
     info!("   Address: {} → Peer: {}", args.address, args.peer);

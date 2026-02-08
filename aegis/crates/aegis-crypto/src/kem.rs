@@ -64,11 +64,12 @@ impl HybridPublicKey {
         }
         let x25519_bytes: [u8; 32] = bytes[..X25519_PK_SIZE].try_into().unwrap();
         let x25519 = X25519PublicKey::from(x25519_bytes);
-        let ml_kem = kyber768::PublicKey::from_bytes(&bytes[X25519_PK_SIZE..])
-            .map_err(|_| CryptoError::InvalidLength {
+        let ml_kem = kyber768::PublicKey::from_bytes(&bytes[X25519_PK_SIZE..]).map_err(|_| {
+            CryptoError::InvalidLength {
                 expected: MLKEM_PK_SIZE,
                 got: bytes.len() - X25519_PK_SIZE,
-            })?;
+            }
+        })?;
         Ok(Self { x25519, ml_kem })
     }
 }
@@ -95,9 +96,11 @@ impl HybridSecretKey {
 
     /// Reconstruct the ML-KEM secret key from stored bytes.
     fn ml_kem_key(&self) -> Result<kyber768::SecretKey, CryptoError> {
-        kyber768::SecretKey::from_bytes(&self.ml_kem_bytes).map_err(|_| CryptoError::InvalidLength {
-            expected: self.ml_kem_bytes.len(),
-            got: self.ml_kem_bytes.len(),
+        kyber768::SecretKey::from_bytes(&self.ml_kem_bytes).map_err(|_| {
+            CryptoError::InvalidLength {
+                expected: self.ml_kem_bytes.len(),
+                got: self.ml_kem_bytes.len(),
+            }
         })
     }
 }
@@ -127,12 +130,13 @@ impl HybridCiphertext {
         }
         let eph_bytes: [u8; 32] = bytes[..X25519_EPH_SIZE].try_into().unwrap();
         let x25519_ephemeral = X25519PublicKey::from(eph_bytes);
-        let ml_kem_ct = kyber768::Ciphertext::from_bytes(&bytes[X25519_EPH_SIZE..]).map_err(
-            |_| CryptoError::InvalidLength {
-                expected: MLKEM_CT_SIZE,
-                got: bytes.len() - X25519_EPH_SIZE,
-            },
-        )?;
+        let ml_kem_ct =
+            kyber768::Ciphertext::from_bytes(&bytes[X25519_EPH_SIZE..]).map_err(|_| {
+                CryptoError::InvalidLength {
+                    expected: MLKEM_CT_SIZE,
+                    got: bytes.len() - X25519_EPH_SIZE,
+                }
+            })?;
         Ok(Self {
             x25519_ephemeral,
             ml_kem_ct,

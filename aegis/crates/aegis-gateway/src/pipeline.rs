@@ -31,8 +31,12 @@ pub fn process_packet(data: &[u8], stats: &PipelineStats) {
     match PacketInfo::parse(data) {
         Some(info) => {
             match info.version {
-                IpVersion::V4 => { stats.ipv4_packets.fetch_add(1, Ordering::Relaxed); }
-                IpVersion::V6 => { stats.ipv6_packets.fetch_add(1, Ordering::Relaxed); }
+                IpVersion::V4 => {
+                    stats.ipv4_packets.fetch_add(1, Ordering::Relaxed);
+                }
+                IpVersion::V6 => {
+                    stats.ipv6_packets.fetch_add(1, Ordering::Relaxed);
+                }
             };
 
             debug!(
@@ -98,7 +102,9 @@ mod tests {
 
     #[test]
     fn strip_af_header_valid() {
-        let data = vec![0, 0, 0, 2, 0x45, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let data = vec![
+            0, 0, 0, 2, 0x45, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
         let stripped = strip_af_header(&data).unwrap();
         assert_eq!(stripped[0] >> 4, 4); // IPv4
     }
