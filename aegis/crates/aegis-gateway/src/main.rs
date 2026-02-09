@@ -201,7 +201,7 @@ async fn main() -> anyhow::Result<()> {
         let writer = Arc::new(Mutex::new(writer));
 
         tokio::spawn(async move {
-            let mut buf = [0u8; PACKET_BUF_SIZE + 128]; // headroom for AEAD overhead
+            let mut buf = [0u8; PACKET_BUF_SIZE + 128]; // extra space for transport header + AEAD tag
             while running_clone.load(Ordering::Relaxed) {
                 let recv_result = tokio::select! {
                     result = socket_clone.recv(&mut buf) => result,
@@ -329,7 +329,7 @@ async fn main() -> anyhow::Result<()> {
 
                     // Check if we need to rekey
                     if mgr.needs_rekey() {
-                        warn!("⚠️  Session needs rekeying (not yet implemented)");
+                        warn!("Session needs rekeying (not yet implemented)");
                         stats.rekeys_initiated.fetch_add(1, Ordering::Relaxed);
                     }
 

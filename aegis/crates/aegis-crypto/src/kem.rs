@@ -136,8 +136,8 @@ impl HybridSecretKey {
         // Validate that the ML-KEM bytes are a valid secret key
         kyber768::SecretKey::from_bytes(&ml_kem_bytes).map_err(|_| {
             CryptoError::InvalidLength {
-                expected: 0,
-                got: ml_kem_bytes.len(),
+                expected: ml_kem_bytes.len(),
+                got: 0,
             }
         })?;
         Ok(Self {
