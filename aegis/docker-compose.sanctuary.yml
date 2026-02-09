@@ -1,0 +1,73 @@
+# Docker Compose configuration for Aegis Sanctuary Server
+#
+# This allows easy deployment of the Sanctuary PQ-WireGuard server.
+#
+# Quick start:
+#   docker-compose -f docker-compose.sanctuary.yml up -d
+#
+# View logs:
+#   docker-compose -f docker-compose.sanctuary.yml logs -f sanctuary
+#
+# Stop:
+#   docker-compose -f docker-compose.sanctuary.yml down
+
+version: '3.8'
+
+services:
+  sanctuary:
+    build:
+      context: .
+      dockerfile: Dockerfile.sanctuary
+    image: aegis-sanctuary:v0.1
+    container_name: aegis-sanctuary
+    
+    # Network configuration
+    ports:
+      - "51820:51820/udp"
+    
+    # Mount configuration and keys directory
+    volumes:
+      - ./sanctuary.toml:/etc/aegis/sanctuary.toml:ro
+      - ./sanctuary-data:/home/aegis/.aegis:rw
+    
+    # Environment variables
+    environment:
+      - RUST_LOG=aegis_sanctuary=info
+    
+    # Resource limits (adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "aegis-sanctuary"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Optional: Define a network for the sanctuary
+networks:
+  default:
+    name: aegis-network
+    driver: bridge
