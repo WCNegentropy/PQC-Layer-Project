@@ -195,6 +195,7 @@ fn process_handshake_init(
     responder_pk: &HybridPublicKey,
     responder_sk: &HybridSecretKey,
     responder_index: u32,
+    peer_addr: SocketAddr,
 ) -> Result<(Vec<u8>, ClientSession), CryptoError> {
     if msg.len() != HANDSHAKE_INIT_SIZE {
         return Err(CryptoError::InvalidLength {
@@ -253,7 +254,7 @@ fn process_handshake_init(
         recv_window: AntiReplayWindow::new(),
         local_index: responder_index,
         remote_index: initiator_index,
-        peer_addr: "0.0.0.0:0".parse().unwrap(), // Will be set by caller
+        peer_addr,
     };
 
     Ok((resp, session))
@@ -456,10 +457,8 @@ impl SanctuaryServer {
         // Generate a unique local index for this session
         let local_index = rand::random::<u32>();
 
-        match process_handshake_init(data, &self.keypair.0, &self.keypair.1, local_index) {
-            Ok((resp, mut session)) => {
-                session.peer_addr = peer_addr;
-
+        match process_handshake_init(data, &self.keypair.0, &self.keypair.1, local_index, peer_addr) {
+            Ok((resp, session)) => {
                 // Check if peer is authorized (if we're not in open mode)
                 if !self.authorized_peers.is_empty() {
                     // Extract initiator's public key from the init message
