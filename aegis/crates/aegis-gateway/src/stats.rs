@@ -15,6 +15,11 @@ pub struct PipelineStats {
     pub dropped_runt: AtomicU64,
     pub dropped_unknown: AtomicU64,
     pub parse_errors: AtomicU64,
+    pub packets_encrypted: AtomicU64,
+    pub packets_decrypted: AtomicU64,
+    pub replay_rejected: AtomicU64,
+    pub handshakes_completed: AtomicU64,
+    pub rekeys_initiated: AtomicU64,
 }
 
 impl PipelineStats {
@@ -28,6 +33,11 @@ impl PipelineStats {
             dropped_runt: AtomicU64::new(0),
             dropped_unknown: AtomicU64::new(0),
             parse_errors: AtomicU64::new(0),
+            packets_encrypted: AtomicU64::new(0),
+            packets_decrypted: AtomicU64::new(0),
+            replay_rejected: AtomicU64::new(0),
+            handshakes_completed: AtomicU64::new(0),
+            rekeys_initiated: AtomicU64::new(0),
         }
     }
 
@@ -54,6 +64,11 @@ impl PipelineStats {
             dropped_runt: self.dropped_runt.load(Ordering::Relaxed),
             dropped_unknown: self.dropped_unknown.load(Ordering::Relaxed),
             parse_errors: self.parse_errors.load(Ordering::Relaxed),
+            packets_encrypted: self.packets_encrypted.load(Ordering::Relaxed),
+            packets_decrypted: self.packets_decrypted.load(Ordering::Relaxed),
+            replay_rejected: self.replay_rejected.load(Ordering::Relaxed),
+            handshakes_completed: self.handshakes_completed.load(Ordering::Relaxed),
+            rekeys_initiated: self.rekeys_initiated.load(Ordering::Relaxed),
         }
     }
 
@@ -61,7 +76,7 @@ impl PipelineStats {
     pub fn report(&self) {
         let snap = self.snapshot();
         info!(
-            "📊 Pipeline Stats | packets: {} | bytes: {} | IPv4: {} | IPv6: {} | dropped: {} (runt: {}, unknown: {})",
+            "📊 Pipeline Stats | packets: {} | bytes: {} | IPv4: {} | IPv6: {} | dropped: {} (runt: {}, unknown: {}) | encrypted: {} | decrypted: {} | replay_rejected: {} | handshakes: {} | rekeys: {}",
             snap.packets_in,
             snap.bytes_in,
             snap.ipv4_packets,
@@ -69,6 +84,11 @@ impl PipelineStats {
             snap.packets_dropped,
             snap.dropped_runt,
             snap.dropped_unknown,
+            snap.packets_encrypted,
+            snap.packets_decrypted,
+            snap.replay_rejected,
+            snap.handshakes_completed,
+            snap.rekeys_initiated,
         );
     }
 }
@@ -90,15 +110,22 @@ pub struct StatsSnapshot {
     pub dropped_runt: u64,
     pub dropped_unknown: u64,
     pub parse_errors: u64,
+    pub packets_encrypted: u64,
+    pub packets_decrypted: u64,
+    pub replay_rejected: u64,
+    pub handshakes_completed: u64,
+    pub rekeys_initiated: u64,
 }
 
 impl fmt::Display for StatsSnapshot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "packets_in={} bytes_in={} ipv4={} ipv6={} dropped={} runt={} unknown={} parse_errors={}",
+            "packets_in={} bytes_in={} ipv4={} ipv6={} dropped={} runt={} unknown={} parse_errors={} encrypted={} decrypted={} replay_rejected={} handshakes={} rekeys={}",
             self.packets_in, self.bytes_in, self.ipv4_packets, self.ipv6_packets,
-            self.packets_dropped, self.dropped_runt, self.dropped_unknown, self.parse_errors
+            self.packets_dropped, self.dropped_runt, self.dropped_unknown, self.parse_errors,
+            self.packets_encrypted, self.packets_decrypted, self.replay_rejected,
+            self.handshakes_completed, self.rekeys_initiated
         )
     }
 }
@@ -141,5 +168,33 @@ mod tests {
         let snap = stats.snapshot();
         assert_eq!(snap.dropped_runt, 1);
         assert_eq!(snap.dropped_unknown, 2);
+    }
+
+    #[test]
+    fn stats_tunnel_counters() {
+        let stats = PipelineStats::new();
+        stats.packets_encrypted.fetch_add(5, Ordering::Relaxed);
+        stats.packets_decrypted.fetch_add(3, Ordering::Relaxed);
+        stats.replay_rejected.fetch_add(1, Ordering::Relaxed);
+        stats.handshakes_completed.fetch_add(2, Ordering::Relaxed);
+        stats.rekeys_initiated.fetch_add(1, Ordering::Relaxed);
+
+        let snap = stats.snapshot();
+        assert_eq!(snap.packets_encrypted, 5);
+        assert_eq!(snap.packets_decrypted, 3);
+        assert_eq!(snap.replay_rejected, 1);
+        assert_eq!(snap.handshakes_completed, 2);
+        assert_eq!(snap.rekeys_initiated, 1);
+    }
+
+    #[test]
+    fn stats_snapshot_display_includes_tunnel_counters() {
+        let stats = PipelineStats::new();
+        stats.packets_encrypted.fetch_add(10, Ordering::Relaxed);
+        stats.packets_decrypted.fetch_add(7, Ordering::Relaxed);
+        let snap = stats.snapshot();
+        let s = format!("{}", snap);
+        assert!(s.contains("encrypted=10"));
+        assert!(s.contains("decrypted=7"));
     }
 }

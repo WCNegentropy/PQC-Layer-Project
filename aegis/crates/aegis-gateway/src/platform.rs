@@ -61,6 +61,19 @@ pub struct Args {
     /// Stats reporting interval in seconds (0 = disabled)
     #[arg(long, default_value_t = 5)]
     pub stats_interval: u64,
+
+    /// Sanctuary UDP endpoint (e.g., "127.0.0.1:51820").
+    /// If not provided, the gateway runs in log-and-drop mode.
+    #[arg(long)]
+    pub sanctuary_addr: Option<String>,
+
+    /// Path to the Sanctuary's hybrid public key file
+    #[arg(long, default_value = "sanctuary.pub")]
+    pub sanctuary_pk_file: String,
+
+    /// Path to our persisted hybrid keypair file
+    #[arg(long, default_value = "aegis.key")]
+    pub keypair_file: String,
 }
 
 // ─── TUN Device Setup ───────────────────────────────────────────────────────

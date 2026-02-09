@@ -28,7 +28,12 @@ const X25519_EPH_SIZE: usize = 32;
 /// Size of an ML-KEM-768 ciphertext in bytes.
 const MLKEM_CT_SIZE: usize = 1088;
 
-/// Combined hybrid public key size: X25519 (32) + ML-KEM-768 (1184) = 1216 bytes.
+/// Size of an X25519 secret key in bytes.
+const X25519_SK_SIZE: usize = 32;
+
+/// Combined hybrid secret key size: X25519 (32) + ML-KEM-768 SK (variable).
+/// Serialized as: X25519 SK (32) + ML-KEM SK bytes.
+/// Note: The actual size depends on the ML-KEM-768 secret key size from pqcrypto.
 pub const HYBRID_PK_SIZE: usize = X25519_PK_SIZE + MLKEM_PK_SIZE;
 /// Combined hybrid ciphertext size: X25519 ephemeral (32) + ML-KEM-768 CT (1088) = 1120 bytes.
 pub const HYBRID_CT_SIZE: usize = X25519_EPH_SIZE + MLKEM_CT_SIZE;
@@ -101,6 +106,43 @@ impl HybridSecretKey {
                 expected: self.ml_kem_bytes.len(),
                 got: self.ml_kem_bytes.len(),
             }
+        })
+    }
+
+    /// Serialize the hybrid secret key to bytes.
+    ///
+    /// Format: `X25519 SK (32 bytes) || ML-KEM SK bytes`.
+    /// The caller is responsible for securing the output.
+    pub fn to_bytes(&self) -> Zeroizing<Vec<u8>> {
+        let mut buf = Zeroizing::new(Vec::with_capacity(X25519_SK_SIZE + self.ml_kem_bytes.len()));
+        buf.extend_from_slice(self.x25519.as_bytes());
+        buf.extend_from_slice(&self.ml_kem_bytes);
+        buf
+    }
+
+    /// Deserialize a hybrid secret key from bytes.
+    ///
+    /// Expects the format produced by [`to_bytes`]: `X25519 SK (32) || ML-KEM SK`.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
+        if bytes.len() <= X25519_SK_SIZE {
+            return Err(CryptoError::InvalidLength {
+                expected: X25519_SK_SIZE + 1,
+                got: bytes.len(),
+            });
+        }
+        let x25519_bytes: [u8; X25519_SK_SIZE] = bytes[..X25519_SK_SIZE].try_into().unwrap();
+        let x25519 = StaticSecret::from(x25519_bytes);
+        let ml_kem_bytes = bytes[X25519_SK_SIZE..].to_vec();
+        // Validate that the ML-KEM bytes are a valid secret key
+        kyber768::SecretKey::from_bytes(&ml_kem_bytes).map_err(|_| {
+            CryptoError::InvalidLength {
+                expected: ml_kem_bytes.len(),
+                got: 0,
+            }
+        })?;
+        Ok(Self {
+            x25519: Zeroizing::new(x25519),
+            ml_kem_bytes: Zeroizing::new(ml_kem_bytes),
         })
     }
 }
