@@ -1,0 +1,76 @@
+# Aegis Sanctuary Server — Dockerfile
+#
+# Multi-stage build for the Sanctuary PQ-WireGuard server.
+# This creates a minimal production image with the compiled sanctuary binary.
+#
+# Build:
+#   docker build -t aegis-sanctuary:v0.1 -f Dockerfile.sanctuary .
+#
+# Run:
+#   docker run -p 51820:51820/udp -v /etc/aegis:/etc/aegis aegis-sanctuary:v0.1
+
+# ─── Stage 1: Builder ───────────────────────────────────────────────────────
+
+FROM rust:1.76-slim AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy workspace manifest and dependency info first (for layer caching)
+COPY Cargo.toml Cargo.lock ./
+
+# Copy all crate sources
+COPY crates ./crates
+COPY apps ./apps
+
+# Build the sanctuary binary in release mode
+RUN cargo build --release -p aegis-sanctuary --bin aegis-sanctuary
+
+# Strip the binary to reduce size
+RUN strip /build/target/release/aegis-sanctuary
+
+# ─── Stage 2: Runtime ───────────────────────────────────────────────────────
+
+FROM debian:bookworm-slim
+
+# Install minimal runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    iproute2 \
+    iptables \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create aegis user and config directory
+RUN useradd -m -u 1000 -s /bin/bash aegis && \
+    mkdir -p /etc/aegis && \
+    chown -R aegis:aegis /etc/aegis
+
+# Copy the binary from builder
+COPY --from=builder /build/target/release/aegis-sanctuary /usr/local/bin/
+
+# Copy default config template
+COPY sanctuary.toml /etc/aegis/sanctuary.toml.example
+
+# Switch to non-root user
+USER aegis
+WORKDIR /home/aegis
+
+# Expose the PQ-WG UDP port
+EXPOSE 51820/udp
+
+# Health check (optional - checks if process is running)
+# Note: UDP services don't have traditional health checks, but we can verify the process
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD pgrep -f aegis-sanctuary || exit 1
+
+# Set environment variables
+ENV RUST_LOG=aegis_sanctuary=info
+
+# Run the sanctuary server
+ENTRYPOINT ["/usr/local/bin/aegis-sanctuary"]
+CMD ["--config", "/etc/aegis/sanctuary.toml"]
