@@ -1,0 +1,30 @@
+# Aegis Sanctuary Server Configuration
+# 
+# This is the configuration file for the Aegis Sanctuary PQ-WireGuard server.
+# The Sanctuary accepts connections from Aegis Gateway clients and provides
+# encrypted tunnel termination with quantum-resistant cryptography.
+
+[server]
+# UDP address and port to listen on
+# Use 0.0.0.0 to listen on all interfaces, or a specific IP for binding
+listen_addr = "0.0.0.0:51820"
+
+# Path to the server's keypair file (private key)
+# The public key will be stored at <keypair_file>.pub
+# If the file doesn't exist, a new keypair will be generated automatically
+keypair_file = "sanctuary.key"
+
+# Log level: trace, debug, info, warn, error
+log_level = "info"
+
+# Optional: Directory containing authorized client public keys
+# Each .pub file in this directory represents an authorized client
+# If not specified or commented out, the server runs in "open mode"
+# and accepts connections from any client (useful for testing)
+# 
+# For production, create a directory and place client .pub files in it:
+#   mkdir -p /etc/aegis/peers
+#   cp client1.key.pub /etc/aegis/peers/
+#   cp client2.key.pub /etc/aegis/peers/
+# 
+# authorized_peers_dir = "/etc/aegis/peers"
