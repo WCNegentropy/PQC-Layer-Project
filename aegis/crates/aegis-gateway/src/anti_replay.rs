@@ -24,10 +24,7 @@ pub struct AntiReplayWindow {
 impl AntiReplayWindow {
     /// Create a new anti-replay window with no counters seen.
     pub fn new() -> Self {
-        Self {
-            top: 0,
-            bitmap: 0,
-        }
+        Self { top: 0, bitmap: 0 }
     }
 
     /// Check whether a counter value is acceptable and, if so, mark it as seen.

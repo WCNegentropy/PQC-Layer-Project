@@ -36,8 +36,8 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 use crate::handshake::{
-    build_handshake_init, process_handshake_response, MSG_HANDSHAKE_INIT, MSG_HANDSHAKE_RESPONSE,
-    HANDSHAKE_RESPONSE_SIZE,
+    build_handshake_init, process_handshake_response, HANDSHAKE_RESPONSE_SIZE, MSG_HANDSHAKE_INIT,
+    MSG_HANDSHAKE_RESPONSE,
 };
 use crate::keypair::{load_or_generate_keypair, load_public_key};
 use crate::pipeline::process_packet;
@@ -124,7 +124,10 @@ async fn main() -> anyhow::Result<()> {
     let udp_socket: Option<Arc<UdpSocket>>;
 
     if let Some(ref sanctuary_addr) = args.sanctuary_addr {
-        info!("🔗 Tunnel mode: connecting to Sanctuary at {}", sanctuary_addr);
+        info!(
+            "🔗 Tunnel mode: connecting to Sanctuary at {}",
+            sanctuary_addr
+        );
 
         // Load or generate our static keypair
         let (our_pk, our_sk) = load_or_generate_keypair(&args.keypair_file)?;
@@ -139,8 +142,7 @@ async fn main() -> anyhow::Result<()> {
 
         // Perform the handshake over UDP
         let sender_index = rand::random::<u32>();
-        let (init_msg, init_state) =
-            build_handshake_init(&sanctuary_pk, &our_pk, sender_index)?;
+        let (init_msg, init_state) = build_handshake_init(&sanctuary_pk, &our_pk, sender_index)?;
 
         socket.send(&init_msg).await?;
         info!("   Handshake init sent (sender_index={})", sender_index);
@@ -162,13 +164,8 @@ async fn main() -> anyhow::Result<()> {
             ));
         }
 
-        let completed = process_handshake_response(
-            resp_msg,
-            init_state,
-            &our_pk,
-            &our_sk,
-            &sanctuary_pk,
-        )?;
+        let completed =
+            process_handshake_response(resp_msg, init_state, &our_pk, &our_sk, &sanctuary_pk)?;
 
         {
             let mut mgr = session_mgr.lock().await;
@@ -234,10 +231,7 @@ async fn main() -> anyhow::Result<()> {
                         let session = match mgr.by_receiver_index(header.receiver_index) {
                             Some(s) => s,
                             None => {
-                                debug!(
-                                    "No session for receiver_index={}",
-                                    header.receiver_index
-                                );
+                                debug!("No session for receiver_index={}", header.receiver_index);
                                 continue;
                             }
                         };
@@ -262,13 +256,12 @@ async fn main() -> anyhow::Result<()> {
                                 // On macOS, prepend the AF header
                                 #[cfg(target_os = "macos")]
                                 {
-                                    let af_header = if !plaintext.is_empty()
-                                        && (plaintext[0] >> 4) == 6
-                                    {
-                                        [0, 0, 0, 30u8] // AF_INET6
-                                    } else {
-                                        [0, 0, 0, 2u8] // AF_INET
-                                    };
+                                    let af_header =
+                                        if !plaintext.is_empty() && (plaintext[0] >> 4) == 6 {
+                                            [0, 0, 0, 30u8] // AF_INET6
+                                        } else {
+                                            [0, 0, 0, 2u8] // AF_INET
+                                        };
                                     let mut full_pkt =
                                         Vec::with_capacity(af_header.len() + plaintext.len());
                                     full_pkt.extend_from_slice(&af_header);
@@ -345,9 +338,7 @@ async fn main() -> anyhow::Result<()> {
                                 if let Err(e) = socket.send(&pkt).await {
                                     error!("UDP send error: {}", e);
                                 }
-                                stats
-                                    .packets_encrypted
-                                    .fetch_add(1, Ordering::Relaxed);
+                                stats.packets_encrypted.fetch_add(1, Ordering::Relaxed);
                             }
                             Err(e) => {
                                 error!("Encrypt error: {}", e);

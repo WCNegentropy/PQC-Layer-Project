@@ -18,8 +18,8 @@
 //! | Transport Data | `0x04` | (see `transport.rs`) |
 
 use aegis_crypto::{
-    AegisCrypto, CryptoError, HybridCiphertext, HybridPublicKey, HybridSecretKey,
-    HYBRID_CT_SIZE, HYBRID_PK_SIZE,
+    AegisCrypto, CryptoError, HybridCiphertext, HybridPublicKey, HybridSecretKey, HYBRID_CT_SIZE,
+    HYBRID_PK_SIZE,
 };
 use hkdf::Hkdf;
 use sha3::{Digest, Sha3_256};
@@ -169,8 +169,7 @@ pub fn process_handshake_init(
     let ct = HybridCiphertext::from_bytes(ct_bytes)?;
 
     // Decapsulate to recover shared_secret_1
-    let shared_secret_1 =
-        AegisCrypto::decapsulate(&ct, responder_static_sk, responder_static_pk)?;
+    let shared_secret_1 = AegisCrypto::decapsulate(&ct, responder_static_sk, responder_static_pk)?;
 
     // Compute transcript hash (same inputs as initiator)
     let transcript_hash_1 = compute_transcript_hash(
@@ -292,11 +291,7 @@ pub fn responder_to_completed(state: ResponderState) -> CompletedHandshake {
 // ─── Key Derivation Helpers ─────────────────────────────────────────────────
 
 /// Compute the transcript hash for the handshake init.
-fn compute_transcript_hash(
-    responder_pk: &[u8],
-    initiator_pk: &[u8],
-    ct: &[u8],
-) -> [u8; 32] {
+fn compute_transcript_hash(responder_pk: &[u8], initiator_pk: &[u8], ct: &[u8]) -> [u8; 32] {
     let mut hasher = Sha3_256::new();
     hasher.update(HANDSHAKE_TRANSCRIPT_LABEL);
     hasher.update(responder_pk);
@@ -430,8 +425,7 @@ mod tests {
         let (responder_pk, _responder_sk) = AegisCrypto::keygen();
         let (_wrong_pk, wrong_sk) = AegisCrypto::keygen();
 
-        let (init_msg, init_state) =
-            build_handshake_init(&responder_pk, &initiator_pk, 1).unwrap();
+        let (init_msg, init_state) = build_handshake_init(&responder_pk, &initiator_pk, 1).unwrap();
 
         // Responder uses wrong secret key
         let (resp_msg, resp_state) =
@@ -461,8 +455,7 @@ mod tests {
         let (initiator_pk, initiator_sk) = AegisCrypto::keygen();
         let (responder_pk, responder_sk) = AegisCrypto::keygen();
 
-        let (init_msg, init_state) =
-            build_handshake_init(&responder_pk, &initiator_pk, 1).unwrap();
+        let (init_msg, init_state) = build_handshake_init(&responder_pk, &initiator_pk, 1).unwrap();
         let (resp_msg, resp_state) =
             process_handshake_init(&init_msg, &responder_pk, &responder_sk, 2).unwrap();
         let i_session = process_handshake_response(
@@ -480,13 +473,9 @@ mod tests {
         let recv_cipher = aegis_crypto::AeadCipher::new(&r_session.keys.recv_key);
 
         let plaintext = b"test IP packet data";
-        let pkt = crate::transport::transport_encrypt(
-            &send_cipher,
-            i_session.remote_index,
-            1,
-            plaintext,
-        )
-        .unwrap();
+        let pkt =
+            crate::transport::transport_encrypt(&send_cipher, i_session.remote_index, 1, plaintext)
+                .unwrap();
 
         let decrypted = crate::transport::transport_decrypt(&recv_cipher, &pkt).unwrap();
         assert_eq!(decrypted.as_slice(), plaintext);
@@ -496,9 +485,7 @@ mod tests {
     fn invalid_init_message_length_rejected() {
         let (responder_pk, responder_sk) = AegisCrypto::keygen();
         let short_msg = vec![0u8; 10];
-        assert!(
-            process_handshake_init(&short_msg, &responder_pk, &responder_sk, 1).is_err()
-        );
+        assert!(process_handshake_init(&short_msg, &responder_pk, &responder_sk, 1).is_err());
     }
 
     #[test]
@@ -506,8 +493,7 @@ mod tests {
         let (initiator_pk, initiator_sk) = AegisCrypto::keygen();
         let (responder_pk, _) = AegisCrypto::keygen();
 
-        let (_, init_state) =
-            build_handshake_init(&responder_pk, &initiator_pk, 1).unwrap();
+        let (_, init_state) = build_handshake_init(&responder_pk, &initiator_pk, 1).unwrap();
 
         let short_msg = vec![0u8; 10];
         assert!(process_handshake_response(

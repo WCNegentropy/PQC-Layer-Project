@@ -66,11 +66,7 @@ fn save_keypair(
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(keypair_file, fs::Permissions::from_mode(0o600)).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to set permissions on '{}': {}",
-                keypair_file,
-                e
-            )
+            anyhow::anyhow!("Failed to set permissions on '{}': {}", keypair_file, e)
         })?;
     }
 
@@ -105,10 +101,7 @@ fn load_keypair(keypair_file: &str) -> anyhow::Result<(HybridPublicKey, HybridSe
     let pk = HybridPublicKey::from_bytes(&pk_bytes)
         .map_err(|e| anyhow::anyhow!("Invalid public key in '{}': {}", pk_path, e))?;
 
-    info!(
-        "   Loaded keypair: {} + {}",
-        keypair_file, pk_path
-    );
+    info!("   Loaded keypair: {} + {}", keypair_file, pk_path);
 
     Ok((pk, sk))
 }
