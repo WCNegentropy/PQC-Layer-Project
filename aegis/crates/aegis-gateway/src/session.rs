@@ -59,7 +59,8 @@ impl Session {
 
     /// Get and increment the send counter.
     ///
-    /// Returns the current counter value and advances it for the next packet.
+    /// Returns the next counter value (starting from 1, since counter 0 is
+    /// reserved and rejected by the anti-replay window).
     pub fn next_counter(&mut self) -> u64 {
         self.send_counter += 1;
         self.send_counter

@@ -218,6 +218,7 @@ pub fn process_handshake_response(
     state: InitiatorState,
     initiator_static_pk: &HybridPublicKey,
     initiator_static_sk: &HybridSecretKey,
+    // Kept for API consistency; will be used for extended transcript binding.
     _responder_static_pk: &HybridPublicKey,
 ) -> Result<CompletedHandshake, CryptoError> {
     if msg.len() != HANDSHAKE_RESPONSE_SIZE {
