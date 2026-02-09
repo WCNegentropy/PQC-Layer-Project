@@ -134,11 +134,9 @@ impl HybridSecretKey {
         let x25519 = StaticSecret::from(x25519_bytes);
         let ml_kem_bytes = bytes[X25519_SK_SIZE..].to_vec();
         // Validate that the ML-KEM bytes are a valid secret key
-        kyber768::SecretKey::from_bytes(&ml_kem_bytes).map_err(|_| {
-            CryptoError::InvalidLength {
-                expected: ml_kem_bytes.len(),
-                got: 0,
-            }
+        kyber768::SecretKey::from_bytes(&ml_kem_bytes).map_err(|_| CryptoError::InvalidLength {
+            expected: ml_kem_bytes.len(),
+            got: 0,
         })?;
         Ok(Self {
             x25519: Zeroizing::new(x25519),
