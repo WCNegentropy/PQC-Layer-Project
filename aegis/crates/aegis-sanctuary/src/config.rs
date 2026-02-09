@@ -118,7 +118,6 @@ impl ServerConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     
     #[test]
     fn parse_basic_config() {
@@ -165,6 +164,8 @@ keypair_file = "test.key"
     
     #[test]
     fn load_authorized_peers_from_directory() {
+        use std::fs;
+        
         let dir = tempfile::tempdir().unwrap();
         let dir_path = dir.path();
         

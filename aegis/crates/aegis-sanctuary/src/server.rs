@@ -65,6 +65,7 @@ const PACKET_BUF_SIZE: usize = 65536;
 // ─── Session Management ─────────────────────────────────────────────────────
 
 /// A client session with transport keys and anti-replay state.
+#[allow(dead_code)]
 struct ClientSession {
     /// Cipher for encrypting packets to the client.
     send_cipher: AeadCipher,
