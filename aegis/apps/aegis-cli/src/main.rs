@@ -83,15 +83,35 @@ fn main() {
         }
         Commands::Keygen { pubkey, privkey } => {
             println!("🔑 Generating hybrid keypair (X25519 + ML-KEM-768)...");
-            let (pk, _sk) = aegis_crypto::AegisCrypto::keygen();
-            // Note: _sk is HybridSecretKey which wraps both components in
-            // Zeroizing<>, so the secret key material is automatically wiped
-            // from memory when _sk is dropped at the end of this block.
+            let (pk, sk) = aegis_crypto::AegisCrypto::keygen();
             let pk_bytes = pk.to_bytes();
-            println!("   Public key:  {} bytes → {pubkey}", pk_bytes.len());
-            println!("   Private key: (zeroized in memory) → {privkey}");
-            println!("   ⚠️  File output not yet implemented (key shown in memory only)");
-            // Future: write keys to files with proper permissions
+            let sk_bytes = sk.to_bytes();
+
+            // Write secret key with restrictive permissions
+            if let Err(e) = std::fs::write(&privkey, sk_bytes.as_slice()) {
+                eprintln!("Failed to write secret key to '{}': {}", privkey, e);
+                std::process::exit(1);
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Err(e) =
+                    std::fs::set_permissions(&privkey, std::fs::Permissions::from_mode(0o600))
+                {
+                    eprintln!("Failed to set permissions on '{}': {}", privkey, e);
+                    std::process::exit(1);
+                }
+            }
+
+            // Write public key
+            if let Err(e) = std::fs::write(&pubkey, &pk_bytes) {
+                eprintln!("Failed to write public key to '{}': {}", pubkey, e);
+                std::process::exit(1);
+            }
+
+            println!("   Public key:  {} bytes → {}", pk_bytes.len(), pubkey);
+            println!("   Private key: {} bytes → {}", sk_bytes.len(), privkey);
+            println!("   ✅ Keypair written to disk");
         }
     }
 }
