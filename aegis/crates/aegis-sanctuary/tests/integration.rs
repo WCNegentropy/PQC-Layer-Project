@@ -32,7 +32,7 @@ async fn sanctuary_binds_and_starts() {
     // This test just verifies the server can bind to a port
     let config = test_server_config();
     let server = SanctuaryServer::bind(&config).await.unwrap();
-    
+
     // We don't call run() because it would block forever
     // Just verifying bind() succeeds is enough for this test
     drop(server);
@@ -52,49 +52,46 @@ async fn client_server_handshake_roundtrip() {
 
     // 2. Start sanctuary server
     let config = test_server_config();
-    
+
     // For testing, we'll manually create the server's keypair files
     let sk_bytes = server_sk.to_bytes();
     let pk_bytes = server_pk.to_bytes();
     std::fs::write("/tmp/test_sanctuary.key", sk_bytes.as_slice()).unwrap();
     std::fs::write("/tmp/test_sanctuary.key.pub", &pk_bytes).unwrap();
-    
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions("/tmp/test_sanctuary.key", std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(
+            "/tmp/test_sanctuary.key",
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
     }
 
     let _server = Arc::new(SanctuaryServer::bind(&config).await.unwrap());
     let server_addr = "127.0.0.1:51821"; // Use a specific port for testing
-    
+
     // Bind server to a known port
     let socket = UdpSocket::bind(server_addr).await.unwrap();
     let _server_addr_parsed: SocketAddr = server_addr.parse().unwrap();
-    
+
     // Drop the socket and rebind in server (this is a workaround for testing)
     drop(socket);
-    
+
     // Instead of using the server, let's do a simpler test:
     // We'll manually construct handshake messages and verify the crypto works
-    
+
     // Build handshake init message (client → server)
     let sender_index = 12345u32;
-    let (init_msg, _init_state) = build_handshake_init_simple(
-        &server_pk,
-        &client_pk,
-        sender_index,
-    ).unwrap();
-    
+    let (init_msg, _init_state) =
+        build_handshake_init_simple(&server_pk, &client_pk, sender_index).unwrap();
+
     // Parse and process the init message (server side)
     let responder_index = 67890u32;
-    let (_response_msg, _session) = process_handshake_init_simple(
-        &init_msg,
-        &server_pk,
-        &server_sk,
-        responder_index,
-    ).unwrap();
-    
+    let (_response_msg, _session) =
+        process_handshake_init_simple(&init_msg, &server_pk, &server_sk, responder_index).unwrap();
+
     // If we get here without errors, the handshake crypto works!
     // Clean up test files
     let _ = std::fs::remove_file("/tmp/test_sanctuary.key");
@@ -108,15 +105,15 @@ use sha3::{Digest, Sha3_256};
 use zeroize::Zeroizing;
 
 const MSG_HANDSHAKE_INIT: u8 = 0x01;
-const HANDSHAKE_INIT_SIZE: usize = 1 + 4 + aegis_crypto::HYBRID_PK_SIZE + aegis_crypto::HYBRID_CT_SIZE;
+const HANDSHAKE_INIT_SIZE: usize =
+    1 + 4 + aegis_crypto::HYBRID_PK_SIZE + aegis_crypto::HYBRID_CT_SIZE;
 const HANDSHAKE_TRANSCRIPT_LABEL: &[u8] = b"aegis-pqwg-handshake-transcript-v1";
 const TRANSPORT_HKDF_INFO: &[u8] = b"aegis-pqwg-transport-v1";
 
-fn compute_transcript_hash(
-    responder_pk: &[u8],
-    initiator_pk: &[u8],
-    kem_ct: &[u8],
-) -> [u8; 32] {
+/// A pair of transport keys (send, receive) derived from the handshake.
+type TransportKeyPair = (Zeroizing<[u8; 32]>, Zeroizing<[u8; 32]>);
+
+fn compute_transcript_hash(responder_pk: &[u8], initiator_pk: &[u8], kem_ct: &[u8]) -> [u8; 32] {
     let mut hasher = Sha3_256::new();
     hasher.update(HANDSHAKE_TRANSCRIPT_LABEL);
     hasher.update(responder_pk);
@@ -141,11 +138,8 @@ fn build_handshake_init_simple(
     let ct_bytes = encap.ciphertext.to_bytes();
     let initiator_pk_bytes = initiator_pk.to_bytes();
 
-    let transcript_hash = compute_transcript_hash(
-        &responder_pk.to_bytes(),
-        &initiator_pk_bytes,
-        &ct_bytes,
-    );
+    let transcript_hash =
+        compute_transcript_hash(&responder_pk.to_bytes(), &initiator_pk_bytes, &ct_bytes);
 
     let mut msg = Vec::with_capacity(HANDSHAKE_INIT_SIZE);
     msg.push(MSG_HANDSHAKE_INIT);
@@ -170,7 +164,7 @@ fn process_handshake_init_simple(
     responder_index: u32,
 ) -> Result<(Vec<u8>, SimpleSession), aegis_crypto::CryptoError> {
     use aegis_crypto::CryptoError;
-    
+
     if msg.len() != HANDSHAKE_INIT_SIZE {
         return Err(CryptoError::InvalidLength {
             expected: HANDSHAKE_INIT_SIZE,
@@ -191,11 +185,8 @@ fn process_handshake_init_simple(
 
     let shared_secret_1 = AegisCrypto::decapsulate(&ct, responder_sk, responder_pk)?;
 
-    let transcript_hash_1 = compute_transcript_hash(
-        &responder_pk.to_bytes(),
-        initiator_pk_bytes,
-        ct_bytes,
-    );
+    let transcript_hash_1 =
+        compute_transcript_hash(&responder_pk.to_bytes(), initiator_pk_bytes, ct_bytes);
 
     let encap_r = AegisCrypto::encapsulate(&initiator_pk)?;
     let ct_r_bytes = encap_r.ciphertext.to_bytes();
@@ -228,7 +219,7 @@ fn derive_transport_keys_simple(
     ss2: &[u8; 32],
     transcript: &[u8; 32],
     is_initiator: bool,
-) -> Result<(Zeroizing<[u8; 32]>, Zeroizing<[u8; 32]>), aegis_crypto::CryptoError> {
+) -> Result<TransportKeyPair, aegis_crypto::CryptoError> {
     let mut combined = [0u8; 96];
     combined[0..32].copy_from_slice(ss1);
     combined[32..64].copy_from_slice(ss2);

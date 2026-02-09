@@ -46,7 +46,8 @@ const MSG_HANDSHAKE_RESPONSE: u8 = 0x02;
 const MSG_TRANSPORT_DATA: u8 = 0x04;
 
 /// Size of a handshake init message.
-const HANDSHAKE_INIT_SIZE: usize = 1 + 4 + aegis_crypto::HYBRID_PK_SIZE + aegis_crypto::HYBRID_CT_SIZE;
+const HANDSHAKE_INIT_SIZE: usize =
+    1 + 4 + aegis_crypto::HYBRID_PK_SIZE + aegis_crypto::HYBRID_CT_SIZE;
 /// Size of a handshake response message.
 const HANDSHAKE_RESPONSE_SIZE: usize = 1 + 4 + 4 + aegis_crypto::HYBRID_CT_SIZE;
 
@@ -57,6 +58,9 @@ const TRANSPORT_MIN_SIZE: usize = TRANSPORT_HEADER_SIZE + aegis_crypto::AEAD_TAG
 
 /// HKDF info string for transport key derivation.
 const TRANSPORT_HKDF_INFO: &[u8] = b"aegis-pqwg-transport-v1";
+
+/// A pair of transport keys (send, receive) derived from the handshake.
+type TransportKeyPair = (Zeroizing<[u8; 32]>, Zeroizing<[u8; 32]>);
 /// Label for handshake transcript binding.
 const HANDSHAKE_TRANSCRIPT_LABEL: &[u8] = b"aegis-pqwg-handshake-transcript-v1";
 
@@ -139,11 +143,7 @@ impl AntiReplayWindow {
 
 // ─── Handshake Helpers ──────────────────────────────────────────────────────
 
-fn compute_transcript_hash(
-    responder_pk: &[u8],
-    initiator_pk: &[u8],
-    kem_ct: &[u8],
-) -> [u8; 32] {
+fn compute_transcript_hash(responder_pk: &[u8], initiator_pk: &[u8], kem_ct: &[u8]) -> [u8; 32] {
     let mut hasher = Sha3_256::new();
     hasher.update(HANDSHAKE_TRANSCRIPT_LABEL);
     hasher.update(responder_pk);
@@ -164,7 +164,7 @@ fn derive_transport_keys(
     ss2: &[u8; 32],
     transcript: &[u8; 32],
     is_initiator: bool,
-) -> Result<(Zeroizing<[u8; 32]>, Zeroizing<[u8; 32]>), CryptoError> {
+) -> Result<TransportKeyPair, CryptoError> {
     let mut combined = [0u8; 96];
     combined[0..32].copy_from_slice(ss1);
     combined[32..64].copy_from_slice(ss2);
@@ -220,11 +220,8 @@ fn process_handshake_init(
     let shared_secret_1 = AegisCrypto::decapsulate(&ct, responder_sk, responder_pk)?;
 
     // Compute transcript hash
-    let transcript_hash_1 = compute_transcript_hash(
-        &responder_pk.to_bytes(),
-        initiator_pk_bytes,
-        ct_bytes,
-    );
+    let transcript_hash_1 =
+        compute_transcript_hash(&responder_pk.to_bytes(), initiator_pk_bytes, ct_bytes);
 
     // Encapsulate back to initiator's PK → shared_secret_2
     let encap_r = AegisCrypto::encapsulate(&initiator_pk)?;
@@ -284,10 +281,7 @@ fn transport_encrypt(
     Ok(pkt)
 }
 
-fn transport_decrypt(
-    cipher: &AeadCipher,
-    data: &[u8],
-) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+fn transport_decrypt(cipher: &AeadCipher, data: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
     if data.len() < TRANSPORT_MIN_SIZE {
         return Err(CryptoError::InvalidLength {
             expected: TRANSPORT_MIN_SIZE,
@@ -368,7 +362,10 @@ impl SanctuaryServer {
         let (pk, sk) = load_or_generate_keypair(&config.server.keypair_file)
             .map_err(|e| SanctuaryError::BindError(e.to_string()))?;
 
-        info!("   Server public key loaded ({} bytes)", pk.to_bytes().len());
+        info!(
+            "   Server public key loaded ({} bytes)",
+            pk.to_bytes().len()
+        );
 
         // Load authorized peers
         let authorized_peers = config.load_authorized_peers()?;
@@ -427,7 +424,9 @@ impl SanctuaryServer {
                 }
             };
 
-            self.stats.bytes_received.fetch_add(n as u64, Ordering::Relaxed);
+            self.stats
+                .bytes_received
+                .fetch_add(n as u64, Ordering::Relaxed);
 
             let data = &buf[..n];
             if data.is_empty() {
@@ -457,7 +456,13 @@ impl SanctuaryServer {
         // Generate a unique local index for this session
         let local_index = rand::random::<u32>();
 
-        match process_handshake_init(data, &self.keypair.0, &self.keypair.1, local_index, peer_addr) {
+        match process_handshake_init(
+            data,
+            &self.keypair.0,
+            &self.keypair.1,
+            local_index,
+            peer_addr,
+        ) {
             Ok((resp, session)) => {
                 // Check if peer is authorized (if we're not in open mode)
                 if !self.authorized_peers.is_empty() {
@@ -481,9 +486,16 @@ impl SanctuaryServer {
                 if let Err(e) = self.socket.send_to(&resp, peer_addr).await {
                     error!("Failed to send handshake response to {}: {}", peer_addr, e);
                 } else {
-                    self.stats.handshakes_completed.fetch_add(1, Ordering::Relaxed);
-                    self.stats.bytes_sent.fetch_add(resp.len() as u64, Ordering::Relaxed);
-                    info!("✅ Handshake complete with {} (session={})", peer_addr, local_index);
+                    self.stats
+                        .handshakes_completed
+                        .fetch_add(1, Ordering::Relaxed);
+                    self.stats
+                        .bytes_sent
+                        .fetch_add(resp.len() as u64, Ordering::Relaxed);
+                    info!(
+                        "✅ Handshake complete with {} (session={})",
+                        peer_addr, local_index
+                    );
                 }
             }
             Err(e) => {
@@ -506,7 +518,10 @@ impl SanctuaryServer {
         let session = match sessions.get_mut(&header.receiver_index) {
             Some(s) => s,
             None => {
-                debug!("No session for receiver_index={} from {}", header.receiver_index, peer_addr);
+                debug!(
+                    "No session for receiver_index={} from {}",
+                    header.receiver_index, peer_addr
+                );
                 return;
             }
         };
@@ -514,7 +529,10 @@ impl SanctuaryServer {
         // Anti-replay check
         if !session.recv_window.check_and_update(header.counter) {
             self.stats.replay_rejected.fetch_add(1, Ordering::Relaxed);
-            debug!("Replay rejected: counter={} from {}", header.counter, peer_addr);
+            debug!(
+                "Replay rejected: counter={} from {}",
+                header.counter, peer_addr
+            );
             return;
         }
 
@@ -531,13 +549,20 @@ impl SanctuaryServer {
                 // Echo back: encrypt and send a dummy response
                 // (In real use, this would be the return traffic from the internet)
                 let counter = session.next_counter();
-                match transport_encrypt(&session.send_cipher, session.remote_index, counter, &plaintext) {
+                match transport_encrypt(
+                    &session.send_cipher,
+                    session.remote_index,
+                    counter,
+                    &plaintext,
+                ) {
                     Ok(encrypted) => {
                         if let Err(e) = self.socket.send_to(&encrypted, peer_addr).await {
                             error!("Failed to send encrypted response to {}: {}", peer_addr, e);
                         } else {
                             self.stats.packets_encrypted.fetch_add(1, Ordering::Relaxed);
-                            self.stats.bytes_sent.fetch_add(encrypted.len() as u64, Ordering::Relaxed);
+                            self.stats
+                                .bytes_sent
+                                .fetch_add(encrypted.len() as u64, Ordering::Relaxed);
                             debug!("Sent encrypted response to {}", peer_addr);
                         }
                     }
@@ -642,7 +667,15 @@ fn save_keypair(
     fs::write(&pk_path, &pk_bytes)
         .map_err(|e| anyhow::anyhow!("Failed to write public key to '{}': {}", pk_path, e))?;
 
-    info!("   Server private key: {} ({} bytes)", keypair_file, sk_bytes.len());
-    info!("   Server public key:  {} ({} bytes)", pk_path, pk_bytes.len());
+    info!(
+        "   Server private key: {} ({} bytes)",
+        keypair_file,
+        sk_bytes.len()
+    );
+    info!(
+        "   Server public key:  {} ({} bytes)",
+        pk_path,
+        pk_bytes.len()
+    );
     Ok(())
 }
