@@ -12,10 +12,14 @@
 //! Run with: sudo cargo run -p aegis-gateway -- --tun-name aegis0
 //! Test with: ping -c 4 10.0.0.254 (in another terminal)
 
+pub mod anti_replay;
+pub mod handshake;
 pub mod packet;
 pub mod pipeline;
 pub mod platform;
+pub mod session;
 pub mod stats;
+pub mod transport;
 
 use clap::Parser;
 use std::sync::atomic::{AtomicBool, Ordering};

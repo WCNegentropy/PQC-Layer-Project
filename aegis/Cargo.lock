@@ -52,12 +52,17 @@ dependencies = [
  "aegis-crypto",
  "anyhow",
  "bytes",
+ "chacha20poly1305",
  "clap",
+ "hkdf",
  "libc",
+ "rand",
+ "sha3",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "tun2",
+ "zeroize",
 ]
 
 [[package]]
