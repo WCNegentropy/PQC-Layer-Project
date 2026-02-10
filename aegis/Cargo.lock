@@ -19,6 +19,7 @@ dependencies = [
  "aegis-crypto",
  "aegis-platform",
  "clap",
+ "libc",
 ]
 
 [[package]]

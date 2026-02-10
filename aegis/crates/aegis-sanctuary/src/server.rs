@@ -34,6 +34,7 @@ use sha3::{Digest, Sha3_256};
 use zeroize::Zeroizing;
 
 use crate::config::ServerConfig;
+use crate::proxy::NatProxy;
 use crate::SanctuaryError;
 
 // ─── Re-export constants and types from gateway ────────────────────────────
@@ -42,7 +43,9 @@ use crate::SanctuaryError;
 const MSG_HANDSHAKE_INIT: u8 = 0x01;
 /// Message type for handshake response.
 const MSG_HANDSHAKE_RESPONSE: u8 = 0x02;
-/// Message type for transport data.
+/// Message type for transport data (used for protocol documentation;
+/// actual dispatching treats any non-handshake message as transport).
+#[allow(dead_code)]
 const MSG_TRANSPORT_DATA: u8 = 0x04;
 
 /// Size of a handshake init message.
@@ -350,6 +353,7 @@ pub struct SanctuaryServer {
     authorized_peers: std::collections::HashSet<Vec<u8>>,
     stats: Arc<ServerStats>,
     running: Arc<AtomicBool>,
+    proxy: Arc<NatProxy>,
 }
 
 impl SanctuaryServer {
@@ -390,6 +394,7 @@ impl SanctuaryServer {
             authorized_peers,
             stats: Arc::new(ServerStats::default()),
             running: Arc::new(AtomicBool::new(true)),
+            proxy: Arc::new(NatProxy::default()),
         })
     }
 
@@ -437,11 +442,13 @@ impl SanctuaryServer {
                 MSG_HANDSHAKE_INIT => {
                     self.handle_handshake_init(data, peer_addr).await;
                 }
-                MSG_TRANSPORT_DATA => {
-                    self.handle_transport_data(data, peer_addr).await;
-                }
                 _ => {
-                    debug!("Unknown message type: 0x{:02x} from {}", data[0], peer_addr);
+                    // All non-handshake-init messages are transport data.
+                    // MSG_HANDSHAKE_RESPONSE (0x02) should never arrive at
+                    // the server (we are always the responder), but we treat
+                    // it the same — the transport decryption will fail and
+                    // the packet will be silently dropped.
+                    self.handle_transport_data(data, peer_addr).await;
                 }
             }
         }
@@ -474,10 +481,17 @@ impl SanctuaryServer {
                     }
                 }
 
-                // Store session
+                // If this peer already has a session, remove the old one (rekey)
                 {
                     let mut sessions = self.sessions.lock().await;
                     let mut peer_map = self.peer_to_index.lock().await;
+                    if let Some(old_index) = peer_map.remove(&peer_addr) {
+                        sessions.remove(&old_index);
+                        debug!(
+                            "Replaced existing session {} for peer {} (rekey)",
+                            old_index, peer_addr
+                        );
+                    }
                     sessions.insert(local_index, session);
                     peer_map.insert(peer_addr, local_index);
                 }
@@ -542,12 +556,14 @@ impl SanctuaryServer {
                 self.stats.packets_decrypted.fetch_add(1, Ordering::Relaxed);
                 debug!("Decrypted {} bytes from {}", plaintext.len(), peer_addr);
 
-                // For v0: Just log-and-drop (NAT proxy stub)
-                // In a real implementation, this would forward to a TUN device or NAT proxy
-                // For now, we'll echo a simple response back to demonstrate bidirectional tunnel
+                // Forward through NAT proxy (no-op when TUN not configured)
+                if let Err(e) = self.proxy.forward(&plaintext).await {
+                    warn!("Proxy forward error from {}: {}", peer_addr, e);
+                }
 
-                // Echo back: encrypt and send a dummy response
-                // (In real use, this would be the return traffic from the internet)
+                // Echo back for v0 demonstration / connectivity testing.
+                // When TUN-based NAT forwarding is active, the return path
+                // is handled by a separate reader task on the TUN device.
                 let counter = session.next_counter();
                 match transport_encrypt(
                     &session.send_cipher,
@@ -580,6 +596,16 @@ impl SanctuaryServer {
     /// Get server statistics.
     pub fn stats(&self) -> &ServerStats {
         &self.stats
+    }
+
+    /// Get a reference to the NAT proxy.
+    pub fn proxy(&self) -> &Arc<NatProxy> {
+        &self.proxy
+    }
+
+    /// Get the local address the server is listening on.
+    pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.socket.local_addr()
     }
 
     /// Create a handle for shutdown signaling.
