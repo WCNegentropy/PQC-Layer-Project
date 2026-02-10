@@ -1,7 +1,7 @@
-# Project Aegis — Architecture Specification v0.2
+# Project Aegis — Architecture Specification v0.3
 
-> **Status:** Steel Thread in progress (Phase 1)
-> **Last Updated:** 2026-02-07
+> **Status:** Phase 1 Complete — PQ-WG tunnel works end-to-end (gateway ↔ sanctuary)
+> **Last Updated:** 2026-02-10
 > **Authors:** WCNegentropy, Copilot
 
 ---
@@ -62,27 +62,48 @@ aegis/
 │   ├── aegis-crypto/               # Layer 2: Cryptographic engine ✅ IMPLEMENTED
 │   │   ├── Cargo.toml
 │   │   └── src/lib.rs              # Hybrid KEM, transcript binding, zeroization
-│   ├── aegis-gateway/              # Layer 3: Quantum Gateway ✅ IMPLEMENTED (Steel Thread)
+│   ├── aegis-gateway/              # Layer 3: Quantum Gateway ✅ IMPLEMENTED
 │   │   ├── Cargo.toml
-│   │   └── src/main.rs             # TUN device, async packet pipeline
-│   ├── aegis-platform/             # Layer 1: OS abstraction (planned)
+│   │   └── src/
+│   │       ├── main.rs             # Gateway entry point, TUN setup, tunnel loop
+│   │       ├── handshake.rs        # PQ-WG initiator/responder, dual KEM, transcript hash
+│   │       ├── transport.rs        # Encrypt/decrypt, counter-nonce, header parsing
+│   │       ├── anti_replay.rs      # RFC 6479 sliding-window replay protection (128-bit)
+│   │       ├── session.rs          # Session lifecycle, counters, rekey triggers
+│   │       ├── keypair.rs          # Keypair persistence (load/save)
+│   │       ├── packet.rs           # Safe IPv4/IPv6 parsing, protocol classification
+│   │       ├── pipeline.rs         # Async packet pipeline
+│   │       ├── platform.rs         # CLI args, TUN config, root check
+│   │       └── stats.rs            # Atomic pipeline statistics (13 counters)
+│   ├── aegis-sanctuary/            # Sanctuary Node ✅ IMPLEMENTED
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── main.rs             # Sanctuary server entry point
+│   │       ├── server.rs           # UDP listener, responder handshake, session mgmt
+│   │       ├── config.rs           # TOML config loading, authorized peers
+│   │       ├── proxy.rs            # NAT proxy, client IP mapping, bandwidth stats
+│   │       └── lib.rs              # Library exports
+│   ├── aegis-platform/             # Layer 1: OS abstraction (trait definitions)
 │   ├── aegis-identity/             # Layer 4: Identity (planned)
 │   ├── aegis-vault/                # Layer 5: Encrypted storage (planned)
-│   ├── aegis-social/               # Layer 7: Social fabric (planned)
-│   └── aegis-sanctuary/            # Sanctuary Node server (planned)
+│   └── aegis-social/               # Layer 7: Social fabric (planned)
 ├── apps/
-│   ├── aegis-desktop/              # Tauri desktop app (planned)
-│   ├── aegis-cli/                  # CLI interface (planned)
-│   └── aegis-web/                  # Web frontend (planned)
+│   ├── aegis-cli/                  # CLI: up/down/status/keygen ✅ FUNCTIONAL
+│   ├── aegis-desktop/              # Tauri desktop app (placeholder)
+│   └── aegis-web/                  # Web frontend (placeholder)
 ├── tests/
 │   ├── integration/
-│   ├── fuzz/
+│   ├── fuzz/                       # 3 fuzz targets: fuzz_kem_deser, fuzz_aead, fuzz_sign
 │   └── benchmarks/
-└── docs/
-    ├── architecture.md             # This document
-    ├── threat-model.md
-    ├── cryptography.md
-    └── protocol-spec.md
+├── docs/
+│   ├── architecture.md             # This document
+│   ├── threat-model.md
+│   ├── cryptography.md
+│   └── protocol-spec.md
+├── Dockerfile.sanctuary            # Multi-stage Docker build for Sanctuary
+├── docker-compose.sanctuary.yml    # Docker Compose for Sanctuary deployment
+├── sanctuary.toml                  # Sanctuary server configuration
+└── test_sanctuary.sh               # Shell test script
 ```
 
 ---
@@ -165,17 +186,22 @@ let pk = HybridPublicKey::from_bytes(&pk_bytes)?;
 
 ---
 
-## 5. Layer 3: Quantum Gateway (`aegis-gateway`) — ✅ IMPLEMENTED (Steel Thread)
+## 5. Layer 3: Quantum Gateway (`aegis-gateway`) — ✅ IMPLEMENTED
 
-### 5.1 Current Capabilities (Steel Thread)
+### 5.1 Current Capabilities
 
 - [x] Platform-aware packet reading (handles macOS 4-byte AF header)
 - [x] Safe IP header parsing (IPv4 + IPv6, no panics on malformed input)
 - [x] Protocol classification (ICMP, TCP, UDP)
-- [x] Atomic pipeline statistics (packet/byte counters)
+- [x] Atomic pipeline statistics (13 counters: packets, bytes, encrypted, decrypted, replay rejected, etc.)
 - [x] Graceful shutdown (Ctrl+C → clean teardown)
 - [x] Root privilege detection
 - [x] Structured logging with env-filter
+- [x] PQ-WG handshake (dual hybrid KEM, transcript binding)
+- [x] Transport encryption (ChaCha20-Poly1305 AEAD)
+- [x] Anti-replay (RFC 6479, 128-bit sliding window)
+- [x] Session management with rekey triggers (120s / 65,536 packets)
+- [x] Keypair persistence (load/save to file)
 
 ### 5.2 Packet Pipeline Architecture
 
@@ -206,10 +232,11 @@ let pk = HybridPublicKey::from_bytes(&pk_bytes)?;
     │  - Payload length         │
     └───────────┬───────────────┘
                 │ PacketInfo
-    ┌───────────▼───────────────┐    ← FUTURE: Antibodies (Tier 1 bloom filter)
-    │    [PLACEHOLDER]          │    ← FUTURE: Split Tunnel classify
-    │    Log & Drop             │    ← FUTURE: Traffic Shaper
-    │                           │    ← FUTURE: PQ-WG encrypt + UDP send
+    ┌───────────▼───────────────┐
+    │  Session::needs_rekey()?  │    ← Re-handshake if expired
+    │  transport_encrypt()      │    ← ChaCha20-Poly1305 AEAD
+    │  AntiReplayWindow::check  │    ← RFC 6479 replay protection
+    │  UDP send → Sanctuary     │    ← Encrypted tunnel packet
     └───────────────────────────┘
 ```
 
@@ -232,13 +259,19 @@ let pk = HybridPublicKey::from_bytes(&pk_bytes)?;
 - [x] `aegis-crypto`: Hybrid KEM with transcript binding
 - [x] Fuzz targets, unit tests, zeroization
 
-### Phase 1: Sentinel MVP (Current — Weeks 3-12)
+### Phase 1: Sentinel MVP ✅ COMPLETE
 - [x] Async packet pipeline with safe parsing
 - [x] Pipeline statistics and graceful shutdown
 - [x] CLI: `aegis up`, `aegis down`, `aegis status`, `aegis keygen`
-- [ ] PQ-WireGuard handshake implementation
-- [ ] Tunnel engine (encrypt/decrypt transport packets)
-- [ ] Sanctuary Node v0 (Docker, PQ-WG termination + NAT)
+- [x] PQ-WireGuard handshake implementation (dual hybrid KEM)
+- [x] Tunnel engine (encrypt/decrypt transport packets)
+- [x] Anti-replay protection (RFC 6479 sliding window)
+- [x] Session management with rekeying (120s / 65,536 packets)
+- [x] Keypair persistence (load/save)
+- [x] Sanctuary Node v0 (UDP server, responder handshake, session management)
+- [x] Sanctuary NAT proxy (IP forwarding, client mapping)
+- [x] Sanctuary Docker deployment (Dockerfile + Compose)
+- [x] Sanctuary TOML configuration + authorized peers
 - [ ] DNS Membrane (local resolver, DoH over tunnel)
 - [ ] `check.aegis.dev` verification endpoint
 
@@ -305,13 +338,13 @@ is ~10× slower than classical WireGuard).
 
 ---
 
-## 8. Sanctuary Network
+## 8. Sanctuary Network — ✅ IMPLEMENTED
 
 The Sanctuary is a network of PQ-WG termination servers that provide:
 
 1. **IP Privacy** — Client traffic exits through the Sanctuary's IP.
 2. **DNS Oblivion** — DNS queries are resolved by the Sanctuary, not the ISP.
-3. **NAT Proxy** — Stateful NAT with connection tracking.
+3. **NAT Proxy** — Stateful NAT with client IP mapping and bandwidth tracking.
 
 ### 8.1 Deployment Model
 
@@ -322,13 +355,35 @@ The Sanctuary is a network of PQ-WG termination servers that provide:
 └─────────┘                 └──────────────┘               └──────────┘
 ```
 
-Sanctuary nodes run as Docker containers with minimal attack surface:
-- Read-only root filesystem
-- No shell access
-- PQ-WG + NAT proxy only
-- Automatic key rotation
+Sanctuary nodes can run as Docker containers with minimal attack surface:
+- Multi-stage build (`Dockerfile.sanctuary`)
+- Non-root user (`aegis`, UID 1000)
+- Resource limits (1 CPU, 512 MB memory via `docker-compose.sanctuary.yml`)
+- Health check (`pgrep -f aegis-sanctuary`)
+- Structured JSON logging
 
-### 8.2 Peer Authorization
+### 8.2 Server Architecture
+
+The Sanctuary server (`aegis-sanctuary`) consists of:
+
+| Module | Role |
+|--------|------|
+| `server.rs` | UDP listener, responder handshake, multi-client session management |
+| `config.rs` | TOML configuration loading, authorized peer discovery |
+| `proxy.rs` | NAT proxy, per-client IP mapping, bandwidth statistics |
+| `main.rs` | Entry point, Ctrl+C shutdown handler |
+
+### 8.3 Configuration (`sanctuary.toml`)
+
+```toml
+[server]
+listen_addr = "0.0.0.0:51820"
+keypair_file = "sanctuary.key"
+log_level = "info"
+authorized_peers_dir = "peers/"    # Optional: directory of peer public keys
+```
+
+### 8.4 Peer Authorization
 
 Each client registers its hybrid public key with the Sanctuary. Only
 authorized peers can establish tunnels. Unauthorized handshake attempts

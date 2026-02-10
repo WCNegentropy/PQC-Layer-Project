@@ -9,12 +9,12 @@ aegis/
 ├── Cargo.toml              # Workspace root configuration
 ├── crates/                 # Core library crates
 │   ├── aegis-crypto/       # Cryptographic primitives and PQC implementations
-│   ├── aegis-gateway/      # Gateway service for routing and access control
-│   ├── aegis-platform/     # Core platform functionality
+│   ├── aegis-gateway/      # PQ-WG tunnel client: TUN, handshake, transport, anti-replay, rekeying
+│   ├── aegis-platform/     # OS abstraction: TUN, keyring, entropy, FS traits
 │   ├── aegis-identity/     # Identity and authentication management
 │   ├── aegis-vault/        # Secure data storage and retrieval
 │   ├── aegis-social/       # Social networking features
-│   └── aegis-sanctuary/    # Secure communication and collaboration
+│   └── aegis-sanctuary/    # PQ-WG server: UDP listener, sessions, NAT proxy, Docker
 ├── apps/                   # Application binaries
 │   ├── aegis-desktop/      # Desktop client application
 │   ├── aegis-cli/          # Command-line interface
@@ -32,6 +32,7 @@ aegis/
 
 - Rust 1.70+ (edition 2021)
 - Cargo
+- Root/admin privileges (for gateway TUN device)
 
 ### Building
 
@@ -63,28 +64,35 @@ cargo test -p aegis-crypto
 
 ### Running Applications
 
-Run the gateway service:
+Run the Sanctuary server (PQ-WG server):
 
 ```bash
-cargo run -p aegis-gateway
+cargo run -p aegis-sanctuary -- --config sanctuary.toml
+```
+
+Run the gateway (PQ-WG tunnel client — requires root and a running Sanctuary):
+
+```bash
+sudo cargo run -p aegis-gateway -- \
+    --sanctuary-addr 127.0.0.1:51820 \
+    --sanctuary-pk-file sanctuary.pub \
+    --keypair-file client.key
 ```
 
 Run the CLI tool:
 
 ```bash
-cargo run -p aegis-cli
+cargo run -p aegis-cli -- status
+cargo run -p aegis-cli -- keygen
+cargo run -p aegis-cli -- up --server 127.0.0.1:51820 --interface aegis0
+cargo run -p aegis-cli -- down --interface aegis0
 ```
 
-Run the desktop application:
+### Docker Deployment (Sanctuary)
 
 ```bash
-cargo run -p aegis-desktop
-```
-
-Run the web server:
-
-```bash
-cargo run -p aegis-web
+docker build -t aegis-sanctuary -f Dockerfile.sanctuary .
+docker compose -f docker-compose.sanctuary.yml up -d
 ```
 
 ## Core Crates
@@ -95,11 +103,19 @@ Provides cryptographic primitives and post-quantum cryptography implementations.
 
 ### aegis-gateway
 
-Gateway service that handles routing, access control, and API management for the platform.
+PQ-WireGuard tunnel client: async TUN-based packet pipeline with hybrid KEM
+handshake, ChaCha20-Poly1305 transport encryption, RFC 6479 anti-replay,
+session rekeying, and keypair persistence.
+
+### aegis-sanctuary
+
+PQ-WireGuard server: UDP listener with responder handshake, multi-client session
+management, NAT proxy for IP forwarding, peer authorization via public-key
+allowlist, TOML configuration, and Docker deployment.
 
 ### aegis-platform
 
-Core platform functionality, including shared utilities and common interfaces.
+OS abstraction layer: TUN device, keyring, entropy, and filesystem trait definitions.
 
 ### aegis-identity
 
@@ -112,10 +128,6 @@ Secure data storage and retrieval with end-to-end encryption.
 ### aegis-social
 
 Social networking features with privacy-preserving protocols.
-
-### aegis-sanctuary
-
-Secure communication and collaboration tools with PQC encryption.
 
 ## Development
 
@@ -135,7 +147,7 @@ For workspace-wide dependencies, add them to the `[workspace.dependencies]` sect
 
 ### Code Organization
 
-- Each crate in `crates/` is a library crate (except `aegis-gateway` which is a binary)
+- Each crate in `crates/` is a library crate (except `aegis-gateway` and `aegis-sanctuary` which are also binaries)
 - Each crate in `apps/` is a binary application
 - Follow Rust naming conventions and API guidelines
 

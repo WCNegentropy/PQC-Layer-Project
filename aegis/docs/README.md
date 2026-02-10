@@ -13,9 +13,9 @@ cryptography (X25519 + ML-KEM-768) to defend against both classical and quantum 
 | Document | Description |
 |----------|-------------|
 | [Architecture](architecture.md) | Full system architecture, wire protocol, deployment model |
-| [Cryptography](cryptography.md) | Algorithm suite, hybrid KEM construction, key zeroization |
+| [Cryptography](cryptography.md) | Algorithm suite, hybrid KEM construction, transport key derivation |
 | [Threat Model](threat-model.md) | Adversary capabilities, trust boundaries, mitigations |
-| [Protocol Spec](protocol-spec.md) | PQ-WireGuard wire protocol, transport format |
+| [Protocol Spec](protocol-spec.md) | PQ-WireGuard wire protocol, handshake, transport format |
 
 ## Architecture
 
@@ -26,16 +26,16 @@ The project is organized as a 7-layer Rust workspace:
 |-------|-------|-------------|--------|
 | `aegis-platform` | L1 | TUN/Keyring/Entropy/FS traits | Trait definitions |
 | `aegis-crypto` | L2 | Hybrid KEM, AEAD, ML-DSA-65 signatures | ✅ Implemented |
-| `aegis-gateway` | L3 | TUN device, async packet pipeline | ✅ Implemented |
+| `aegis-gateway` | L3 | PQ-WG tunnel client: TUN, handshake, transport, anti-replay, rekeying | ✅ Implemented |
 | `aegis-identity` | L4 | DIDs, key hierarchy, VCs, auth | Module stubs |
 | `aegis-vault` | L5 | Encrypted storage, FUSE, CRDT sync | Module stubs |
 | `aegis-social` | L7 | PQ messaging, groups, federation | Module stubs |
-| `aegis-sanctuary` | — | PQ-WG server, NAT proxy | Module stubs |
+| `aegis-sanctuary` | — | PQ-WG server: UDP listener, sessions, NAT proxy, Docker | ✅ Implemented |
 
 ### Applications
 | App | Description | Status |
 |-----|-------------|--------|
-| `aegis-cli` | CLI: `aegis up/down/status/keygen` | ✅ Commands defined |
+| `aegis-cli` | CLI: `aegis up/down/status/keygen` | ✅ Functional |
 | `aegis-desktop` | Tauri 2.0 desktop app | Placeholder |
 | `aegis-web` | Axum web server | Placeholder |
 
@@ -46,15 +46,21 @@ The project is organized as a 7-layer Rust workspace:
 cd aegis
 cargo build
 
-# Run tests (50 tests across the workspace)
+# Run tests (90+ tests across the workspace)
 cargo test --workspace
 
 # Use the CLI
 cargo run -p aegis-cli -- status
 cargo run -p aegis-cli -- keygen
 
-# Run the gateway (requires root)
-sudo cargo run -p aegis-gateway -- --tun-name aegis0
+# Run the gateway (requires root and Sanctuary server)
+sudo cargo run -p aegis-gateway -- \
+    --sanctuary-addr 127.0.0.1:51820 \
+    --sanctuary-pk-file sanctuary.pub \
+    --keypair-file client.key
+
+# Run the Sanctuary server
+cargo run -p aegis-sanctuary -- --config sanctuary.toml
 ```
 
 ## Development

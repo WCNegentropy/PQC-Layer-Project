@@ -1,6 +1,8 @@
 # Aegis Cryptography Specification
 
-> **Status:** Stub — to be expanded as additional primitives are implemented.
+> **Status:** Active — covers implemented primitives including transport key derivation.
+>
+> **Last Updated:** 2026-02-10
 
 ## Overview
 
@@ -73,3 +75,63 @@ ML-DSA-65 (FIPS 204, formerly Dilithium3) is used for handshake authentication:
 | `sha3` | 0.10 | SHA3-256 |
 | `hkdf` | 0.12 | HKDF |
 | `zeroize` | 1.7 | Memory scrubbing |
+
+## Transport Key Derivation
+
+After the PQ-WG handshake completes, transport keys are derived from the
+two shared secrets (`ss1` from initiator→responder KEM, `ss2` from
+responder→initiator KEM) using HKDF with the transcript hash as salt.
+
+**Implementation:** `derive_transport_keys()` in `crates/aegis-gateway/src/handshake.rs`
+
+```text
+IKM  = ss1 || ss2                        (64 bytes: two 32-byte shared secrets)
+salt = extended_transcript_hash           (32 bytes: SHA3-256)
+info = b"aegis-pqwg-transport-v1"
+
+OKM  = HKDF-SHA3-256(IKM, salt, info)    (64 bytes output)
+
+initiator_to_responder_key = OKM[0..32]
+responder_to_initiator_key = OKM[32..64]
+```
+
+The dual shared secret approach ensures that if **either** KEM (X25519 or
+ML-KEM-768) remains secure, the transport keys are computationally
+indistinguishable from random.
+
+## Transcript Hash
+
+The transcript hash binds the handshake messages cryptographically,
+preventing cross-session replay attacks.
+
+**Implementation:** `compute_transcript_hash()`, `extend_transcript_hash()`
+in `crates/aegis-gateway/src/handshake.rs`
+
+```text
+transcript = SHA3-256(
+    b"aegis-pqwg-handshake-transcript-v1" ||
+    responder_pk || initiator_pk || kem_ct_i
+)
+
+extended_transcript = SHA3-256(transcript || kem_ct_r)
+```
+
+The extended transcript (including the responder's ciphertext) is used as the
+HKDF salt for transport key derivation, ensuring both messages contribute
+to the key schedule.
+
+## Counter-Based Nonce
+
+Transport packets use a counter-based nonce for ChaCha20-Poly1305 AEAD.
+The 12-byte nonce is constructed from the 64-bit packet counter:
+
+**Implementation:** `counter_to_nonce()` in `crates/aegis-gateway/src/transport.rs`
+
+```text
+nonce[0..4]  = 0x00 0x00 0x00 0x00   (4 zero bytes, per WireGuard convention)
+nonce[4..12] = counter               (8 bytes, little-endian)
+```
+
+The counter MUST be strictly increasing within a session. The anti-replay
+window (RFC 6479) rejects any counter value that has already been seen or
+falls outside the 128-bit sliding window.
