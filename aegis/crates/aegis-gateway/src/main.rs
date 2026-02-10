@@ -123,6 +123,13 @@ async fn main() -> anyhow::Result<()> {
     let session_mgr = Arc::new(Mutex::new(SessionManager::new()));
     let udp_socket: Option<Arc<UdpSocket>>;
 
+    // Store keypairs for rekeying (shared with the main loop)
+    let tunnel_keys: Option<(
+        aegis_crypto::HybridPublicKey,
+        aegis_crypto::HybridSecretKey,
+        aegis_crypto::HybridPublicKey,
+    )>;
+
     if let Some(ref sanctuary_addr) = args.sanctuary_addr {
         info!(
             "🔗 Tunnel mode: connecting to Sanctuary at {}",
@@ -175,10 +182,12 @@ async fn main() -> anyhow::Result<()> {
         stats.handshakes_completed.fetch_add(1, Ordering::Relaxed);
         info!("✅ Handshake complete — tunnel session established");
 
+        tunnel_keys = Some((our_pk, our_sk, sanctuary_pk));
         udp_socket = Some(Arc::new(socket));
     } else {
         info!("📦 No sanctuary address configured — running in log-and-drop mode");
         info!("   Use --sanctuary-addr to enable tunnel mode");
+        tunnel_keys = None;
         udp_socket = None;
     }
 
@@ -322,8 +331,102 @@ async fn main() -> anyhow::Result<()> {
 
                     // Check if we need to rekey
                     if mgr.needs_rekey() {
-                        warn!("Session needs rekeying (not yet implemented)");
-                        stats.rekeys_initiated.fetch_add(1, Ordering::Relaxed);
+                        if let Some((ref our_pk, ref our_sk, ref sanctuary_pk)) = tunnel_keys {
+                            info!("🔄 Session needs rekeying — initiating re-handshake");
+                            stats.rekeys_initiated.fetch_add(1, Ordering::Relaxed);
+
+                            let new_index = rand::random::<u32>();
+                            match build_handshake_init(sanctuary_pk, our_pk, new_index) {
+                                Ok((init_msg, init_state)) => {
+                                    // Drop the session manager lock before async I/O
+                                    drop(mgr);
+
+                                    if let Err(e) = socket.send(&init_msg).await {
+                                        error!("Rekey handshake send error: {}", e);
+                                    } else {
+                                        // Wait for response with timeout
+                                        let mut resp_buf = [0u8; HANDSHAKE_RESPONSE_SIZE + 64];
+                                        match tokio::time::timeout(
+                                            std::time::Duration::from_secs(5),
+                                            socket.recv(&mut resp_buf),
+                                        )
+                                        .await
+                                        {
+                                            Ok(Ok(n)) => {
+                                                let resp_msg = &resp_buf[..n];
+                                                if !resp_msg.is_empty()
+                                                    && resp_msg[0] == MSG_HANDSHAKE_RESPONSE
+                                                {
+                                                    match process_handshake_response(
+                                                        resp_msg,
+                                                        init_state,
+                                                        our_pk,
+                                                        our_sk,
+                                                        sanctuary_pk,
+                                                    ) {
+                                                        Ok(completed) => {
+                                                            let mut mgr = session_mgr.lock().await;
+                                                            mgr.install(completed);
+                                                            stats
+                                                                .handshakes_completed
+                                                                .fetch_add(1, Ordering::Relaxed);
+                                                            info!(
+                                                                "✅ Rekey complete — new session established"
+                                                            );
+                                                        }
+                                                        Err(e) => {
+                                                            warn!(
+                                                                "Rekey handshake response error: {}",
+                                                                e
+                                                            );
+                                                        }
+                                                    }
+                                                } else {
+                                                    warn!("Rekey: unexpected response type");
+                                                }
+                                            }
+                                            Ok(Err(e)) => {
+                                                warn!("Rekey recv error: {}", e);
+                                            }
+                                            Err(_) => {
+                                                warn!("Rekey timeout: no response from Sanctuary");
+                                            }
+                                        }
+                                    }
+
+                                    // Re-acquire lock and continue with packet sending
+                                    let mut mgr = session_mgr.lock().await;
+                                    if let Some(session) = mgr.active_mut() {
+                                        let counter = session.next_counter();
+                                        match transport_encrypt(
+                                            &session.send_cipher,
+                                            session.remote_index,
+                                            counter,
+                                            ip_packet,
+                                        ) {
+                                            Ok(pkt) => {
+                                                if let Err(e) = socket.send(&pkt).await {
+                                                    error!("UDP send error: {}", e);
+                                                }
+                                                stats
+                                                    .packets_encrypted
+                                                    .fetch_add(1, Ordering::Relaxed);
+                                            }
+                                            Err(e) => {
+                                                error!("Encrypt error: {}", e);
+                                            }
+                                        }
+                                    }
+                                    continue;
+                                }
+                                Err(e) => {
+                                    warn!("Rekey build_handshake_init error: {}", e);
+                                }
+                            }
+                        } else {
+                            warn!("Session needs rekeying but no tunnel keys available");
+                            stats.rekeys_initiated.fetch_add(1, Ordering::Relaxed);
+                        }
                     }
 
                     if let Some(session) = mgr.active_mut() {

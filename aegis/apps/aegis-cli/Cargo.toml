@@ -11,3 +11,6 @@ description = "Aegis command-line interface — aegis up/down/status"
 aegis-crypto = { path = "../../crates/aegis-crypto" }
 aegis-platform = { path = "../../crates/aegis-platform" }
 clap = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
