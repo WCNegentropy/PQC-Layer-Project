@@ -200,7 +200,7 @@ let pk = HybridPublicKey::from_bytes(&pk_bytes)?;
 - [x] PQ-WG handshake (dual hybrid KEM, transcript binding)
 - [x] Transport encryption (ChaCha20-Poly1305 AEAD)
 - [x] Anti-replay (RFC 6479, 128-bit sliding window)
-- [x] Session management with rekey triggers (120s / 65 536 packets)
+- [x] Session management with rekey triggers (120s / 65,536 packets)
 - [x] Keypair persistence (load/save to file)
 
 ### 5.2 Packet Pipeline Architecture
@@ -266,7 +266,7 @@ let pk = HybridPublicKey::from_bytes(&pk_bytes)?;
 - [x] PQ-WireGuard handshake implementation (dual hybrid KEM)
 - [x] Tunnel engine (encrypt/decrypt transport packets)
 - [x] Anti-replay protection (RFC 6479 sliding window)
-- [x] Session management with rekeying (120s / 65 536 packets)
+- [x] Session management with rekeying (120s / 65,536 packets)
 - [x] Keypair persistence (load/save)
 - [x] Sanctuary Node v0 (UDP server, responder handshake, session management)
 - [x] Sanctuary NAT proxy (IP forwarding, client mapping)

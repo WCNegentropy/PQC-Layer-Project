@@ -40,7 +40,7 @@ and the security properties each layer is designed to provide.
 | L3 (Gateway) | PQ-WG handshake (dual hybrid KEM) | ✅ Implemented |
 | L3 (Gateway) | Transport encryption (ChaCha20-Poly1305 AEAD) | ✅ Implemented |
 | L3 (Gateway) | Anti-replay (RFC 6479 sliding window) | ✅ Implemented |
-| L3 (Gateway) | Session rekeying / forward secrecy (120s / 65 536 pkts) | ✅ Implemented |
+| L3 (Gateway) | Session rekeying / forward secrecy (120s / 65,536 pkts) | ✅ Implemented |
 | L3 (Gateway) | Keypair persistence (load/save to file) | ✅ Implemented |
 | Sanctuary | Responder handshake + session management | ✅ Implemented |
 | Sanctuary | Peer authorization (public-key allowlist) | ✅ Implemented |

@@ -142,7 +142,7 @@ compromising current keys does not reveal past traffic.
 
 **Defaults:**
 - `DEFAULT_REKEY_INTERVAL`: 120 seconds (matching WireGuard's `REKEY_AFTER_TIME`)
-- `DEFAULT_REKEY_AFTER_PACKETS`: 65 536 (2¹⁶)
+- `DEFAULT_REKEY_AFTER_PACKETS`: 65,536 (2¹⁶)
 
 A session's `needs_rekey()` method returns `true` when either threshold is
 exceeded, triggering re-handshake.
