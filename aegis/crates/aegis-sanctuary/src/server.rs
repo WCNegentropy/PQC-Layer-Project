@@ -442,14 +442,12 @@ impl SanctuaryServer {
                 MSG_HANDSHAKE_INIT => {
                     self.handle_handshake_init(data, peer_addr).await;
                 }
-                MSG_HANDSHAKE_RESPONSE => {
-                    debug!(
-                        "Ignoring handshake response from {} (we are responder)",
-                        peer_addr
-                    );
-                }
                 _ => {
-                    // Treat all non-handshake messages as transport data
+                    // All non-handshake-init messages are transport data.
+                    // MSG_HANDSHAKE_RESPONSE (0x02) should never arrive at
+                    // the server (we are always the responder), but we treat
+                    // it the same — the transport decryption will fail and
+                    // the packet will be silently dropped.
                     self.handle_transport_data(data, peer_addr).await;
                 }
             }

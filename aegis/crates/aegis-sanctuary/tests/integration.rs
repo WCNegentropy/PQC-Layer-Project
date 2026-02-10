@@ -564,8 +564,7 @@ type TransportKeyPair = (Zeroizing<[u8; 32]>, Zeroizing<[u8; 32]>);
 struct CompletedSession {
     send_key: Zeroizing<[u8; 32]>,
     recv_key: Zeroizing<[u8; 32]>,
-    #[allow(dead_code)]
-    local_index: u32,
+    _local_index: u32,
     remote_index: u32,
 }
 
@@ -682,7 +681,7 @@ fn process_handshake_response_full(
     Ok(CompletedSession {
         send_key,
         recv_key,
-        local_index: state.sender_index,
+        _local_index: state.sender_index,
         remote_index: responder_index,
     })
 }

@@ -197,7 +197,7 @@ fn pid_file_path() -> String {
     // Use /tmp/aegis for non-root, /run/aegis for root
     #[cfg(unix)]
     {
-        let dir = if unsafe { libc::getuid() } == 0 {
+        let dir = if is_running_as_root() {
             "/run/aegis"
         } else {
             "/tmp/aegis"
@@ -211,6 +211,13 @@ fn pid_file_path() -> String {
         let _ = std::fs::create_dir_all(&dir);
         dir.join("gateway.pid").to_string_lossy().to_string()
     }
+}
+
+/// Check if the current process is running as root.
+#[cfg(unix)]
+fn is_running_as_root() -> bool {
+    // SAFETY: getuid() is a simple libc call with no preconditions.
+    unsafe { libc::getuid() == 0 }
 }
 
 /// Write a PID to the PID file.
