@@ -49,6 +49,10 @@ log_level = "info"
 
 # Optional: restrict to authorized clients only
 # authorized_peers_dir = "/etc/aegis/peers"
+
+# Simple per-peer handshake flood protection
+handshake_rate_limit_window_secs = 10
+handshake_rate_limit_max_attempts = 8
 ```
 
 ### 4. Run
@@ -131,11 +135,12 @@ To restrict access to specific clients:
 The sanctuary logs statistics every 30 seconds:
 
 ```
-📊 Server Stats: handshakes=5 | encrypted=1234 | decrypted=1234 | replay_rejected=0 | rx_bytes=65536 | tx_bytes=65536
+📊 Server Stats: handshakes=5 | rate_limited=0 | unauthorized=0 | encrypted=1234 | decrypted=1234 | replay_rejected=0 | rx_bytes=65536 | tx_bytes=65536
 ```
 
 Monitor these metrics to:
 - Verify client connections (`handshakes`)
+- Watch for abusive peers (`rate_limited`, `unauthorized`)
 - Check tunnel traffic (`encrypted`, `decrypted`)
 - Detect replay attacks (`replay_rejected`)
 
