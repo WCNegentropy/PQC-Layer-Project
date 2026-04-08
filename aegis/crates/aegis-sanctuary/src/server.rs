@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
@@ -99,48 +100,109 @@ impl ClientSession {
 
 /// Simple anti-replay window (RFC 6479 sliding bitmap).
 struct AntiReplayWindow {
-    last_counter: u64,
-    bitmap: u64,
+    top: u64,
+    bitmap: u128,
 }
 
 impl AntiReplayWindow {
     fn new() -> Self {
-        Self {
-            last_counter: 0,
-            bitmap: 0,
-        }
+        Self { top: 0, bitmap: 0 }
     }
 
     fn check_and_update(&mut self, counter: u64) -> bool {
-        const WINDOW_SIZE: u64 = 64;
+        const WINDOW_SIZE: u64 = 128;
 
         if counter == 0 {
             return false; // Counter 0 is reserved
         }
 
-        if counter > self.last_counter {
-            // Advance window
-            let delta = counter - self.last_counter;
-            if delta < WINDOW_SIZE {
-                self.bitmap = (self.bitmap << delta) | 1;
+        if counter > self.top {
+            let shift = counter - self.top;
+            if shift >= WINDOW_SIZE {
+                self.bitmap = 0;
             } else {
-                self.bitmap = 1;
+                self.bitmap <<= shift;
             }
-            self.last_counter = counter;
-            true
-        } else if self.last_counter - counter < WINDOW_SIZE {
-            // Within window
-            let bit_index = self.last_counter - counter;
-            let mask = 1u64 << bit_index;
-            if self.bitmap & mask != 0 {
-                false // Replay
-            } else {
-                self.bitmap |= mask;
-                true
-            }
-        } else {
-            false // Too old
+            self.top = counter;
+            self.bitmap |= 1;
+            return true;
         }
+
+        let offset = self.top - counter;
+        if offset >= WINDOW_SIZE {
+            return false;
+        }
+
+        let bit = 1u128 << offset;
+        if self.bitmap & bit != 0 {
+            return false;
+        }
+
+        self.bitmap |= bit;
+        true
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct HandshakeRateLimit {
+    window: Duration,
+    max_attempts: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PeerHandshakeState {
+    window_started_at: Instant,
+    attempts: u32,
+}
+
+#[derive(Debug)]
+struct HandshakeAdmissionTracker {
+    limits: HandshakeRateLimit,
+    peers: HashMap<SocketAddr, PeerHandshakeState>,
+    attempts_since_last_prune: u32,
+}
+
+impl HandshakeAdmissionTracker {
+    fn new(window: Duration, max_attempts: u32) -> Self {
+        Self {
+            limits: HandshakeRateLimit {
+                window,
+                max_attempts,
+            },
+            peers: HashMap::new(),
+            attempts_since_last_prune: 0,
+        }
+    }
+
+    fn check_and_record(&mut self, peer_addr: SocketAddr) -> bool {
+        let now = Instant::now();
+        self.attempts_since_last_prune += 1;
+        if self.attempts_since_last_prune >= 64 {
+            self.prune(now);
+            self.attempts_since_last_prune = 0;
+        }
+
+        let entry = self.peers.entry(peer_addr).or_insert(PeerHandshakeState {
+            window_started_at: now,
+            attempts: 0,
+        });
+
+        if now.duration_since(entry.window_started_at) >= self.limits.window {
+            entry.window_started_at = now;
+            entry.attempts = 0;
+        }
+
+        if entry.attempts >= self.limits.max_attempts {
+            return false;
+        }
+
+        entry.attempts += 1;
+        true
+    }
+
+    fn prune(&mut self, now: Instant) {
+        self.peers
+            .retain(|_, state| now.duration_since(state.window_started_at) < self.limits.window);
     }
 }
 
@@ -168,15 +230,14 @@ fn derive_transport_keys(
     transcript: &[u8; 32],
     is_initiator: bool,
 ) -> Result<TransportKeyPair, CryptoError> {
-    let mut combined = [0u8; 96];
-    combined[0..32].copy_from_slice(ss1);
-    combined[32..64].copy_from_slice(ss2);
-    combined[64..96].copy_from_slice(transcript);
+    let mut ikm = Zeroizing::new([0u8; 64]);
+    ikm[..32].copy_from_slice(ss1);
+    ikm[32..].copy_from_slice(ss2);
 
-    let hkdf = Hkdf::<Sha3_256>::new(None, &combined);
+    let hkdf = Hkdf::<Sha3_256>::new(Some(transcript), ikm.as_ref());
     let mut out = Zeroizing::new([0u8; 64]);
     hkdf.expand(TRANSPORT_HKDF_INFO, out.as_mut_slice())
-        .map_err(|_| CryptoError::AeadError)?;
+        .map_err(|_| CryptoError::KdfError)?;
 
     let mut send_key = Zeroizing::new([0u8; 32]);
     let mut recv_key = Zeroizing::new([0u8; 32]);
@@ -190,6 +251,18 @@ fn derive_transport_keys(
     }
 
     Ok((send_key, recv_key))
+}
+
+fn initiator_public_key_bytes(msg: &[u8]) -> Result<&[u8], &'static str> {
+    if msg.len() != HANDSHAKE_INIT_SIZE {
+        return Err("invalid handshake init length");
+    }
+
+    if msg[0] != MSG_HANDSHAKE_INIT {
+        return Err("invalid handshake init message type");
+    }
+
+    Ok(&msg[5..5 + aegis_crypto::HYBRID_PK_SIZE])
 }
 
 /// Process a handshake init message (responder side) and build a response.
@@ -321,6 +394,8 @@ fn parse_transport_header(data: &[u8]) -> Option<TransportHeader> {
 #[derive(Debug, Default)]
 pub struct ServerStats {
     pub handshakes_completed: AtomicU64,
+    pub handshakes_rate_limited: AtomicU64,
+    pub unauthorized_handshakes: AtomicU64,
     pub packets_encrypted: AtomicU64,
     pub packets_decrypted: AtomicU64,
     pub replay_rejected: AtomicU64,
@@ -331,8 +406,10 @@ pub struct ServerStats {
 impl ServerStats {
     pub fn report(&self) {
         info!(
-            "📊 Server Stats: handshakes={} | encrypted={} | decrypted={} | replay_rejected={} | rx_bytes={} | tx_bytes={}",
+            "📊 Server Stats: handshakes={} | rate_limited={} | unauthorized={} | encrypted={} | decrypted={} | replay_rejected={} | rx_bytes={} | tx_bytes={}",
             self.handshakes_completed.load(Ordering::Relaxed),
+            self.handshakes_rate_limited.load(Ordering::Relaxed),
+            self.unauthorized_handshakes.load(Ordering::Relaxed),
             self.packets_encrypted.load(Ordering::Relaxed),
             self.packets_decrypted.load(Ordering::Relaxed),
             self.replay_rejected.load(Ordering::Relaxed),
@@ -351,6 +428,7 @@ pub struct SanctuaryServer {
     sessions: Arc<Mutex<HashMap<u32, ClientSession>>>, // indexed by local_index
     peer_to_index: Arc<Mutex<HashMap<SocketAddr, u32>>>, // map peer addr → local_index
     authorized_peers: std::collections::HashSet<Vec<u8>>,
+    handshake_admission: Arc<Mutex<HandshakeAdmissionTracker>>,
     stats: Arc<ServerStats>,
     running: Arc<AtomicBool>,
     proxy: Arc<NatProxy>,
@@ -378,6 +456,11 @@ impl SanctuaryServer {
         } else {
             info!("   {} authorized peer(s) loaded", authorized_peers.len());
         }
+        info!(
+            "   Handshake rate limit: {} attempt(s) per {}s per peer",
+            config.server.handshake_rate_limit_max_attempts,
+            config.server.handshake_rate_limit_window_secs
+        );
 
         // Bind UDP socket
         let socket = UdpSocket::bind(&config.server.listen_addr)
@@ -392,6 +475,10 @@ impl SanctuaryServer {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             peer_to_index: Arc::new(Mutex::new(HashMap::new())),
             authorized_peers,
+            handshake_admission: Arc::new(Mutex::new(HandshakeAdmissionTracker::new(
+                Duration::from_secs(config.server.handshake_rate_limit_window_secs),
+                config.server.handshake_rate_limit_max_attempts,
+            ))),
             stats: Arc::new(ServerStats::default()),
             running: Arc::new(AtomicBool::new(true)),
             proxy: Arc::new(NatProxy::default()),
@@ -460,6 +547,34 @@ impl SanctuaryServer {
     async fn handle_handshake_init(&self, data: &[u8], peer_addr: SocketAddr) {
         debug!("Received handshake init from {}", peer_addr);
 
+        {
+            let mut admission = self.handshake_admission.lock().await;
+            if !admission.check_and_record(peer_addr) {
+                self.stats
+                    .handshakes_rate_limited
+                    .fetch_add(1, Ordering::Relaxed);
+                warn!("Rate-limited handshake init from {}", peer_addr);
+                return;
+            }
+        }
+
+        let initiator_pk_bytes = match initiator_public_key_bytes(data) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                warn!("Malformed handshake init from {}: {}", peer_addr, e);
+                return;
+            }
+        };
+
+        if !self.authorized_peers.is_empty() && !self.authorized_peers.contains(initiator_pk_bytes)
+        {
+            self.stats
+                .unauthorized_handshakes
+                .fetch_add(1, Ordering::Relaxed);
+            warn!("Unauthorized peer attempted connection from {}", peer_addr);
+            return;
+        }
+
         // Generate a unique local index for this session
         let local_index = rand::random::<u32>();
 
@@ -471,16 +586,6 @@ impl SanctuaryServer {
             peer_addr,
         ) {
             Ok((resp, session)) => {
-                // Check if peer is authorized (if we're not in open mode)
-                if !self.authorized_peers.is_empty() {
-                    // Extract initiator's public key from the init message
-                    let initiator_pk_bytes = &data[5..5 + aegis_crypto::HYBRID_PK_SIZE];
-                    if !self.authorized_peers.contains(initiator_pk_bytes) {
-                        warn!("Unauthorized peer attempted connection from {}", peer_addr);
-                        return;
-                    }
-                }
-
                 // If this peer already has a session, remove the old one (rekey)
                 {
                     let mut sessions = self.sessions.lock().await;
@@ -704,4 +809,39 @@ fn save_keypair(
         pk_bytes.len()
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    fn peer(port: u16) -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)
+    }
+
+    #[test]
+    fn anti_replay_window_matches_gateway_behavior() {
+        let mut window = AntiReplayWindow::new();
+        assert!(window.check_and_update(128));
+        assert!(window.check_and_update(1));
+        assert!(!window.check_and_update(1));
+        assert!(window.check_and_update(129));
+        assert!(!window.check_and_update(1));
+    }
+
+    #[test]
+    fn handshake_admission_tracker_limits_per_peer() {
+        let mut tracker = HandshakeAdmissionTracker::new(Duration::from_secs(60), 2);
+        assert!(tracker.check_and_record(peer(1001)));
+        assert!(tracker.check_and_record(peer(1001)));
+        assert!(!tracker.check_and_record(peer(1001)));
+        assert!(tracker.check_and_record(peer(1002)));
+    }
+
+    #[test]
+    fn initiator_public_key_bytes_rejects_short_messages() {
+        let err = initiator_public_key_bytes(&[MSG_HANDSHAKE_INIT]).unwrap_err();
+        assert_eq!(err, "invalid handshake init length");
+    }
 }

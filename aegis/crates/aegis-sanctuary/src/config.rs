@@ -14,6 +14,8 @@
 //! # Optional: directory containing .pub files of authorized client keys
 //! # If not specified, all clients are accepted (useful for testing)
 //! # authorized_peers_dir = "/etc/aegis/peers"
+//! handshake_rate_limit_window_secs = 10
+//! handshake_rate_limit_max_attempts = 8
 //! ```
 
 use serde::Deserialize;
@@ -48,10 +50,26 @@ pub struct ServerSettings {
     /// Each .pub file in this directory is treated as an authorized peer.
     /// If not specified, all peers are accepted (open mode for testing).
     pub authorized_peers_dir: Option<String>,
+
+    /// Sliding window size for per-peer handshake rate limiting in seconds.
+    #[serde(default = "default_handshake_rate_limit_window_secs")]
+    pub handshake_rate_limit_window_secs: u64,
+
+    /// Maximum handshake init attempts accepted from a peer within the window.
+    #[serde(default = "default_handshake_rate_limit_max_attempts")]
+    pub handshake_rate_limit_max_attempts: u32,
 }
 
 fn default_log_level() -> String {
     "info".to_string()
+}
+
+fn default_handshake_rate_limit_window_secs() -> u64 {
+    10
+}
+
+fn default_handshake_rate_limit_max_attempts() -> u32 {
+    8
 }
 
 impl ServerConfig {
@@ -143,6 +161,8 @@ keypair_file = "/etc/aegis/sanctuary.key"
         assert_eq!(config.server.keypair_file, "/etc/aegis/sanctuary.key");
         assert_eq!(config.server.log_level, "info"); // default
         assert!(config.server.authorized_peers_dir.is_none());
+        assert_eq!(config.server.handshake_rate_limit_window_secs, 10);
+        assert_eq!(config.server.handshake_rate_limit_max_attempts, 8);
     }
 
     #[test]
@@ -153,6 +173,8 @@ listen_addr = "127.0.0.1:51820"
 keypair_file = "sanctuary.key"
 log_level = "debug"
 authorized_peers_dir = "/etc/aegis/peers"
+handshake_rate_limit_window_secs = 30
+handshake_rate_limit_max_attempts = 3
 "#;
 
         let config: ServerConfig = toml::from_str(toml).unwrap();
@@ -161,6 +183,8 @@ authorized_peers_dir = "/etc/aegis/peers"
             config.server.authorized_peers_dir.unwrap(),
             "/etc/aegis/peers"
         );
+        assert_eq!(config.server.handshake_rate_limit_window_secs, 30);
+        assert_eq!(config.server.handshake_rate_limit_max_attempts, 3);
     }
 
     #[test]

@@ -28,3 +28,7 @@ log_level = "info"
 #   cp client2.key.pub /etc/aegis/peers/
 # 
 # authorized_peers_dir = "/etc/aegis/peers"
+
+# Handshake flood protection: max handshake-init attempts per peer in the time window
+handshake_rate_limit_window_secs = 10
+handshake_rate_limit_max_attempts = 8

@@ -22,6 +22,8 @@ fn test_server_config(suffix: &str) -> ServerConfig {
             keypair_file: format!("/tmp/test_sanctuary_{}.key", suffix),
             log_level: "debug".to_string(),
             authorized_peers_dir: None, // open mode for testing
+            handshake_rate_limit_window_secs: 10,
+            handshake_rate_limit_max_attempts: 8,
         },
     }
 }
@@ -253,6 +255,8 @@ async fn unauthorized_peer_rejected() {
             keypair_file: "/tmp/test_sanctuary_authz.key".to_string(),
             log_level: "debug".to_string(),
             authorized_peers_dir: Some(peers_dir.path().to_string_lossy().to_string()),
+            handshake_rate_limit_window_secs: 10,
+            handshake_rate_limit_max_attempts: 8,
         },
     };
 
@@ -297,6 +301,91 @@ async fn unauthorized_peer_rejected() {
             .handshakes_completed
             .load(std::sync::atomic::Ordering::Relaxed),
         0
+    );
+    assert_eq!(
+        server
+            .stats()
+            .unauthorized_handshakes
+            .load(std::sync::atomic::Ordering::Relaxed),
+        1
+    );
+
+    shutdown.stop();
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), server_task).await;
+    cleanup_server_keypair(&config);
+}
+
+#[tokio::test]
+async fn handshake_rate_limit_drops_excess_attempts() {
+    tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_max_level(tracing::Level::DEBUG)
+        .try_init()
+        .ok();
+
+    let mut config = test_server_config("rate_limit");
+    config.server.handshake_rate_limit_window_secs = 60;
+    config.server.handshake_rate_limit_max_attempts = 2;
+
+    let (server_pk, _) = setup_server_keypair(&config);
+
+    let server = Arc::new(SanctuaryServer::bind(&config).await.unwrap());
+    let server_addr = server.local_addr().unwrap();
+    let shutdown = server.clone_for_shutdown();
+
+    let server_clone = Arc::clone(&server);
+    let server_task = tokio::spawn(async move {
+        let _ = server_clone.run().await;
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+    for sender_index in 1..=2u32 {
+        let (client_pk, _) = AegisCrypto::keygen();
+        let (init_msg, _) =
+            build_handshake_init_full(&server_pk, &client_pk, sender_index).unwrap();
+        client_socket.send_to(&init_msg, server_addr).await.unwrap();
+
+        let mut resp_buf = [0u8; 65536];
+        let (n, _) = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client_socket.recv_from(&mut resp_buf),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(resp_buf[0], 0x02, "attempt {} should succeed", sender_index);
+        assert!(n >= HANDSHAKE_RESPONSE_SIZE);
+    }
+
+    let (client_pk, _) = AegisCrypto::keygen();
+    let (init_msg, _) = build_handshake_init_full(&server_pk, &client_pk, 99).unwrap();
+    client_socket.send_to(&init_msg, server_addr).await.unwrap();
+
+    let mut resp_buf = [0u8; 65536];
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        client_socket.recv_from(&mut resp_buf),
+    )
+    .await;
+
+    assert!(result.is_err(), "rate-limited attempt should be dropped");
+    assert_eq!(
+        server
+            .stats()
+            .handshakes_completed
+            .load(std::sync::atomic::Ordering::Relaxed),
+        2
+    );
+    assert_eq!(
+        server
+            .stats()
+            .handshakes_rate_limited
+            .load(std::sync::atomic::Ordering::Relaxed),
+        1
     );
 
     shutdown.stop();
@@ -756,15 +845,14 @@ fn derive_transport_keys_simple(
     transcript: &[u8; 32],
     is_initiator: bool,
 ) -> Result<TransportKeyPair, aegis_crypto::CryptoError> {
-    let mut combined = [0u8; 96];
-    combined[0..32].copy_from_slice(ss1);
-    combined[32..64].copy_from_slice(ss2);
-    combined[64..96].copy_from_slice(transcript);
+    let mut ikm = Zeroizing::new([0u8; 64]);
+    ikm[..32].copy_from_slice(ss1);
+    ikm[32..].copy_from_slice(ss2);
 
-    let hkdf = Hkdf::<Sha3_256>::new(None, &combined);
+    let hkdf = Hkdf::<Sha3_256>::new(Some(transcript), ikm.as_ref());
     let mut out = Zeroizing::new([0u8; 64]);
     hkdf.expand(TRANSPORT_HKDF_INFO, out.as_mut_slice())
-        .map_err(|_| aegis_crypto::CryptoError::AeadError)?;
+        .map_err(|_| aegis_crypto::CryptoError::KdfError)?;
 
     let mut send_key = Zeroizing::new([0u8; 32]);
     let mut recv_key = Zeroizing::new([0u8; 32]);
