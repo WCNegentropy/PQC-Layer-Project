@@ -344,7 +344,8 @@ async fn handshake_rate_limit_drops_excess_attempts() {
 
     for sender_index in 1..=2u32 {
         let (client_pk, _) = AegisCrypto::keygen();
-        let (init_msg, _) = build_handshake_init_full(&server_pk, &client_pk, sender_index).unwrap();
+        let (init_msg, _) =
+            build_handshake_init_full(&server_pk, &client_pk, sender_index).unwrap();
         client_socket.send_to(&init_msg, server_addr).await.unwrap();
 
         let mut resp_buf = [0u8; 65536];

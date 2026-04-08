@@ -563,7 +563,8 @@ impl SanctuaryServer {
             }
         };
 
-        if !self.authorized_peers.is_empty() && !self.authorized_peers.contains(initiator_pk_bytes) {
+        if !self.authorized_peers.is_empty() && !self.authorized_peers.contains(initiator_pk_bytes)
+        {
             self.stats
                 .unauthorized_handshakes
                 .fetch_add(1, Ordering::Relaxed);
