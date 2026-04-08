@@ -159,6 +159,7 @@ struct PeerHandshakeState {
 struct HandshakeAdmissionTracker {
     limits: HandshakeRateLimit,
     peers: HashMap<SocketAddr, PeerHandshakeState>,
+    attempts_since_last_prune: u32,
 }
 
 impl HandshakeAdmissionTracker {
@@ -169,12 +170,17 @@ impl HandshakeAdmissionTracker {
                 max_attempts,
             },
             peers: HashMap::new(),
+            attempts_since_last_prune: 0,
         }
     }
 
     fn check_and_record(&mut self, peer_addr: SocketAddr) -> bool {
         let now = Instant::now();
-        self.prune(now);
+        self.attempts_since_last_prune += 1;
+        if self.attempts_since_last_prune >= 64 {
+            self.prune(now);
+            self.attempts_since_last_prune = 0;
+        }
 
         let entry = self.peers.entry(peer_addr).or_insert(PeerHandshakeState {
             window_started_at: now,
@@ -247,16 +253,13 @@ fn derive_transport_keys(
     Ok((send_key, recv_key))
 }
 
-fn initiator_public_key_bytes(msg: &[u8]) -> Result<&[u8], CryptoError> {
+fn initiator_public_key_bytes(msg: &[u8]) -> Result<&[u8], &'static str> {
     if msg.len() != HANDSHAKE_INIT_SIZE {
-        return Err(CryptoError::InvalidLength {
-            expected: HANDSHAKE_INIT_SIZE,
-            got: msg.len(),
-        });
+        return Err("invalid handshake init length");
     }
 
     if msg[0] != MSG_HANDSHAKE_INIT {
-        return Err(CryptoError::AeadError);
+        return Err("invalid handshake init message type");
     }
 
     Ok(&msg[5..5 + aegis_crypto::HYBRID_PK_SIZE])
@@ -839,6 +842,6 @@ mod tests {
     #[test]
     fn initiator_public_key_bytes_rejects_short_messages() {
         let err = initiator_public_key_bytes(&[MSG_HANDSHAKE_INIT]).unwrap_err();
-        assert!(matches!(err, CryptoError::InvalidLength { .. }));
+        assert_eq!(err, "invalid handshake init length");
     }
 }
