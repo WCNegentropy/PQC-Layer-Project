@@ -9,8 +9,14 @@ description = "Aegis command-line interface — aegis up/down/status"
 
 [dependencies]
 aegis-crypto = { path = "../../crates/aegis-crypto" }
+aegis-identity = { path = "../../crates/aegis-identity" }
 aegis-platform = { path = "../../crates/aegis-platform" }
+aegis-vault = { path = "../../crates/aegis-vault" }
 clap = { workspace = true }
+serde_json = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

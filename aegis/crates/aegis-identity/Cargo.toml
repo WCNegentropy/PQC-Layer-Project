@@ -8,4 +8,9 @@ repository.workspace = true
 description = "Identity anchor (Layer 4) — DIDs, key hierarchy, VCs, auth"
 
 [dependencies]
+aegis-crypto = { path = "../aegis-crypto" }
+rand = "0.8"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha3 = "0.10"
 thiserror = "1.0"
