@@ -8,6 +8,12 @@ Aegis is a **layered, modular platform** providing individuals with quantum-resi
 control over their data, identity, and communications. It uses hybrid post-quantum
 cryptography (X25519 + ML-KEM-768) to defend against both classical and quantum adversaries.
 
+The intended social architecture is now **private-node first**: each user will
+run their own private node by default, direct node-to-node connections are the
+core path, and shared Sanctuary nodes are optional spaces users may host or join.
+Current transport/server crates are implemented foundations for that direction,
+not evidence that the full private-node social runtime already exists.
+
 ## Documentation Index
 
 | Document | Description |
@@ -16,6 +22,7 @@ cryptography (X25519 + ML-KEM-768) to defend against both classical and quantum 
 | [Cryptography](cryptography.md) | Algorithm suite, hybrid KEM construction, transport key derivation |
 | [Threat Model](threat-model.md) | Adversary capabilities, trust boundaries, mitigations |
 | [Protocol Spec](protocol-spec.md) | PQ-WireGuard wire protocol, handshake, transport format |
+| [Social Platform Spec](../../aegis-social-platform-spec-v2.md) | Intended private-node social product and node model |
 
 ## Architecture
 
@@ -27,10 +34,10 @@ The project is organized as a 7-layer Rust workspace:
 | `aegis-platform` | L1 | TUN/Keyring/Entropy/FS traits | Trait definitions |
 | `aegis-crypto` | L2 | Hybrid KEM, AEAD, ML-DSA-65 signatures | ✅ Implemented |
 | `aegis-gateway` | L3 | PQ-WG tunnel client: TUN, handshake, transport, anti-replay, rekeying | ✅ Implemented |
-| `aegis-identity` | L4 | DIDs, key hierarchy, VCs, auth | Module stubs |
+| `aegis-identity` | L4 | DIDs, key hierarchy, VCs, discovery/auth | Module stubs |
 | `aegis-vault` | L5 | Encrypted storage, FUSE, CRDT sync | Module stubs |
-| `aegis-social` | L7 | PQ messaging, groups, federation | Module stubs |
-| `aegis-sanctuary` | — | PQ-WG server: UDP listener, sessions, NAT proxy, Docker | ✅ Implemented |
+| `aegis-social` | L7 | Private-node social runtime, optional shared nodes, federation | Module stubs |
+| `aegis-sanctuary` | — | Current PQ-WG responder/server for optional/private/shared node roles | ✅ Implemented |
 
 ### Applications
 | App | Description | Status |

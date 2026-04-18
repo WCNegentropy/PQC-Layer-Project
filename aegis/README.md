@@ -2,6 +2,15 @@
 
 A comprehensive Post-Quantum Cryptography (PQC) platform for secure data ownership, sovereignty, and security.
 
+## Architecture Direction
+
+The intended long-term topology is **private-node first**:
+
+- every user gets their own private Aegis node by default,
+- direct node-to-node connections are the primary social path,
+- shared Sanctuary nodes are optional community/platform spaces rather than mandatory hops,
+- the current implemented gateway and Sanctuary crates are transport primitives that future private/shared node runtimes will build on.
+
 ## Project Structure
 
 ```
@@ -11,10 +20,10 @@ aegis/
 │   ├── aegis-crypto/       # Cryptographic primitives and PQC implementations
 │   ├── aegis-gateway/      # PQ-WG tunnel client: TUN, handshake, transport, anti-replay, rekeying
 │   ├── aegis-platform/     # OS abstraction: TUN, keyring, entropy, FS traits
-│   ├── aegis-identity/     # Identity and authentication management
+│   ├── aegis-identity/     # Identity, DIDs, discovery records, and authentication
 │   ├── aegis-vault/        # Secure data storage and retrieval
-│   ├── aegis-social/       # Social networking features
-│   └── aegis-sanctuary/    # PQ-WG server: UDP listener, sessions, NAT proxy, Docker
+│   ├── aegis-social/       # Planned private-node social runtime and optional shared rooms
+│   └── aegis-sanctuary/    # Current PQ-WG server primitive for self-hosted private/shared nodes
 ├── apps/                   # Application binaries
 │   ├── aegis-desktop/      # Desktop client application
 │   ├── aegis-cli/          # Command-line interface
@@ -64,13 +73,13 @@ cargo test -p aegis-crypto
 
 ### Running Applications
 
-Run the Sanctuary server (PQ-WG server):
+Run the Sanctuary server (current PQ-WG server primitive):
 
 ```bash
 cargo run -p aegis-sanctuary -- --config sanctuary.toml
 ```
 
-Run the gateway (PQ-WG tunnel client — requires root and a running Sanctuary):
+Run the gateway (PQ-WG tunnel client — requires root and a running Sanctuary-compatible responder):
 
 ```bash
 sudo cargo run -p aegis-gateway -- \
@@ -109,9 +118,11 @@ session rekeying, and keypair persistence.
 
 ### aegis-sanctuary
 
-PQ-WireGuard server: UDP listener with responder handshake, multi-client session
-management, NAT proxy for IP forwarding, peer authorization via public-key
-allowlist, TOML configuration, and Docker deployment.
+Current PQ-WireGuard responder/server: UDP listener with responder handshake,
+multi-client session management, NAT proxy for IP forwarding, peer authorization
+via public-key allowlist, TOML configuration, and Docker deployment. In the
+intended architecture it becomes a reusable building block for private and
+shared self-hosted nodes, not a mandatory central platform hop.
 
 ### aegis-platform
 
@@ -119,7 +130,8 @@ OS abstraction layer: TUN device, keyring, entropy, and filesystem trait definit
 
 ### aegis-identity
 
-Identity and authentication management system with support for decentralized identity.
+Identity and authentication management system with support for decentralized
+identity, DID-based peer discovery, and verifiable credentials.
 
 ### aegis-vault
 
@@ -127,7 +139,8 @@ Secure data storage and retrieval with end-to-end encryption.
 
 ### aegis-social
 
-Social networking features with privacy-preserving protocols.
+Planned social layer for private-node spaces, direct visits, optional shared
+nodes, messaging, and federation.
 
 ## Development
 

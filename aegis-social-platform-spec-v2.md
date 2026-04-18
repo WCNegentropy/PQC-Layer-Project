@@ -1,10 +1,10 @@
 # Aegis Social Platform — Product Specification v2
 ## Project Aegis · WCNegentropy Holdings LLC
 
-> **Document Type:** Product & Architecture Specification  
-> **Version:** 2.0  
-> **Date:** 2026-04-17  
-> **Status:** Active — supersedes v1 (pre-pivot, Secria partnership draft)  
+> **Document Type:** Product & Architecture Specification
+> **Version:** 2.1
+> **Date:** 2026-04-18
+> **Status:** Active — supersedes v1 (pre-pivot, Secria partnership draft)
 > **Repo:** [WCNegentropy/PQC-Layer-Project](https://github.com/WCNegentropy/PQC-Layer-Project)
 
 ---
@@ -13,7 +13,34 @@
 
 The Aegis Social Platform is a decentralized, post-quantum-cryptographically secured social environment built natively on the Aegis infrastructure stack. It is best understood as a spiritual successor to the creative era of MySpace and the playful world-building of Club Penguin — rebuilt from first principles with 2026-era cryptography, true data ownership, and a free-by-default economic model that is structurally impossible for centralized competitors to replicate.
 
-Every user gets their own **Personal Space**: a fully customizable, HTML/CSS/JS-rendered digital environment stored entirely in their local Aegis encrypted vault. Characters, outfits, items, room layouts, and profile data are all local-first JSON and asset files — the platform hosts nothing on their behalf. Social interaction happens peer-to-peer over PQC-secured Aegis tunnels, or via shared Sanctuary nodes for group spaces and events. Because content lives on user devices, the core platform is **free by default** — not as a promotional offer, but as a structural consequence of the architecture.
+Every user gets their own **private node** and **Personal Space**: a fully customizable, HTML/CSS/JS-rendered digital environment stored entirely in their local Aegis encrypted vault and served from infrastructure they control. Characters, outfits, items, room layouts, and profile data are all local-first JSON and asset files — the platform hosts nothing on their behalf by default. Social interaction happens directly private-node-to-private-node over PQC-secured Aegis tunnels, or via **opt-in** shared Sanctuary nodes for group spaces and events. Because content lives on user devices, the core platform is **free by default** — not as a promotional offer, but as a structural consequence of the architecture.
+
+## Network Topology Thesis
+
+The intended default path is:
+
+```text
+User A private node ──► User B private node
+```
+
+Not:
+
+```text
+User A ──► platform Sanctuary ──► User B
+```
+
+Shared Sanctuary nodes still matter, but only as optional spaces a user chooses to join or host:
+
+```text
+User A private node ──► shared Sanctuary / community node
+```
+
+This means:
+
+- the core product does not require WCNegentropy-hosted servers to function,
+- local testing can prove the architecture with two private nodes on one machine,
+- shared nodes are additive social spaces rather than central dependencies,
+- discovery is the main additional systems problem, not content hosting.
 
 ---
 
@@ -27,6 +54,7 @@ On the Aegis Social Platform, the cost equation is inverted:
 - **Your items** are files in your vault, not rows in a database.
 - **Your character** is a JSON file you own, not a record tied to an account you could lose.
 - **Your messages** are end-to-end encrypted before they leave your device.
+- **Your node** is yours to run — the platform does not need to host your room for you.
 
 There is no central infrastructure bill for user content because there is no central infrastructure serving it. This means the free tier is not subsidized — it is simply the natural state of the system. Paid extras exist, but they are genuinely optional enhancements, not paywalled core features.
 
@@ -144,29 +172,30 @@ NFTs promised digital ownership but delivered JPEG URLs on centralized servers. 
 
 When User A visits User B's space:
 
-1. User A's client initiates a PQ-WireGuard tunnel to User B's Aegis node (via Sanctuary NAT traversal if behind NAT)
-2. User B's client serves `vault://social/space/` over the authenticated, encrypted tunnel
-3. User A's client renders the received HTML/CSS/JS in a sandboxed local context
-4. User A's character (avatar JSON + equipped items) is transmitted to User B's client for rendering in B's space
-5. Real-time interaction (chat, emotes, positional state) is handled via PQ Double Ratchet messaging over the same tunnel
+1. User A's client resolves User B's private node via manual exchange, bootstrap discovery, or DID records
+2. User A's client initiates a PQC tunnel directly to User B's Aegis node
+3. User B's client serves `vault://social/space/` over the authenticated, encrypted tunnel
+4. User A's client renders the received HTML/CSS/JS in a sandboxed local context
+5. User A's character (avatar JSON + equipped items) is transmitted to User B's client for rendering in B's space
+6. Real-time interaction (chat, emotes, positional state) is handled via PQ Double Ratchet messaging over the same tunnel
 
 **Privacy properties of a visit:**
 - The visit content (room HTML) is encrypted in transit (ChaCha20-Poly1305)
 - User B can verify User A's DID before serving content (whitelist/blocklist supported)
-- No platform server sees the room content or the visit — it is a direct peer connection
+- No platform server sees the room content or the visit — it is a direct private-node connection
 - User B can revoke access at any time by closing the tunnel
 
 ---
 
 ### Layer 5 — Shared Nodes (The Club Penguin Room Analogy)
 
-Shared nodes are Sanctuary-hosted environments that multiple users visit simultaneously — the closest equivalent to Club Penguin's public rooms or a virtual event space.
+Shared nodes are **opt-in** Sanctuary-compatible environments that multiple users visit simultaneously — the closest equivalent to Club Penguin's public rooms or a virtual event space.
 
 **How they work:**
-- A shared node is an Aegis Sanctuary instance running a **room server** crate (`aegis-social` Layer 7)
+- A shared node is an Aegis Sanctuary-compatible instance running a **room server** crate (`aegis-social` Layer 7)
 - The room's state is a **CRDT-synced JSON document** — all connected clients maintain a consistent view of who is present, where characters are positioned, and what the current room state is
 - Group messaging within a shared node uses **MLS (Messaging Layer Security)** with ML-KEM-768 — all chat is end-to-end encrypted even on a shared node the platform operates
-- The room's visual environment (HTML/assets) is served by the node operator — platform-hosted nodes provide official environments, community-hosted nodes can provide anything
+- The room's visual environment (HTML/assets) is served by the node operator — platform-hosted nodes are optional, community-hosted nodes can provide anything
 
 **Node types:**
 
@@ -205,9 +234,9 @@ All messaging is post-quantum encrypted, natively integrated with the Aegis cryp
 | Direct Message (1:1) | PQ Double Ratchet | ML-KEM-768 + ChaCha20-Poly1305 | ✅ Per-message |
 | Space Chat (visitor in your room) | PQ Double Ratchet | Same as DM | ✅ Per-session |
 | Shared Node Group Chat | MLS (RFC 9420) + ML-KEM-768 | Group key agreement | ✅ Per-epoch |
-| Async Message (offline) | Sealed-sender store-and-forward via Sanctuary | ML-KEM-768 encrypted to recipient PK | ✅ |
+| Async Message (offline) | Optional deferred delivery via user/community/platform-operated relay node | ML-KEM-768 encrypted to recipient PK | ✅ |
 
-Messages are stored in the user's vault, not on any server. The platform operates Sanctuary relay nodes for NAT traversal and async message delivery, but these nodes see only encrypted ciphertext — they cannot read message content.
+Messages are stored in the user's vault, not on any server. Direct delivery between private nodes is the default. If offline delivery is later added, relay/store-and-forward infrastructure must remain optional and ciphertext-only — not a prerequisite for the core experience.
 
 ---
 
@@ -231,14 +260,15 @@ This means the Aegis Social Platform launches with access to the entire Fedivers
 | Feature | Cost | Reason |
 |---|---|---|
 | Personal Space (HTML/CSS/JS room) | Free forever | Lives in user's vault — no hosting cost |
+| Private node runtime | Free forever | Core user-owned infrastructure |
 | Character + base avatar | Free forever | Local JSON file |
 | Base item set (launch collection) | Free forever | Distributed as vault-importable bundles |
 | Custom-coded space | Free forever | User's own compute, user's own vault |
-| Visiting other spaces | Free forever | Peer-to-peer tunnel — no CDN cost |
+| Visiting other spaces | Free forever | Direct node-to-node tunnel — no CDN cost |
 | Attending shared nodes | Free forever | Node operator bears cost, not platform |
 | Direct messaging | Free forever | PQC tunnel, vault storage |
 | ActivityPub federation | Free forever | Standard protocol, no per-message cost |
-| Self-hosting a shared node | Free forever | User runs their own Sanctuary |
+| Self-hosting a shared node | Free forever | User runs their own node |
 
 ### Paid Extras — Genuinely Optional
 
@@ -246,12 +276,11 @@ This means the Aegis Social Platform launches with access to the entire Fedivers
 |---|---|---|
 | Premium item drops | One-time purchase | Exclusive cosmetics, rare collectibles |
 | Creator marketplace | Revenue share | Creators sell item bundles, room themes |
-| Platform-hosted shared node (managed) | Subscription | For users who want a node without self-hosting |
-| Verified creator badge | Application + fee | DID-linked, ML-DSA-65 signed by platform |
-| Space analytics | Subscription | Visitor stats, engagement data (privacy-preserving) |
-| Priority Sanctuary relay | Subscription | Lower-latency async message delivery |
+| Premium official room/theme packs | One-time purchase | User-importable content they keep |
+| Verified creator badge | One-time fee | DID-linked, ML-DSA-65 signed by platform |
+| Optional managed services (if offered later) | Service fee | Convenience only, never required for core access |
 
-The guiding principle: **if it requires the user to trust us with their data or content, it is free. If it requires us to run infrastructure on their behalf, it may have a cost.**
+The guiding principle: **if it is core to user sovereignty, it is free and user-controlled. Paid extras should be optional, ownership-preserving, and preferably one-time rather than recurring.**
 
 ---
 
@@ -273,20 +302,25 @@ The guiding principle: **if it requires the user to trust us with their data or 
 ### Phase 2A — Identity Foundation (prerequisite)
 - Implement `aegis-identity` crate: DID generation (`did:aegis`), ML-DSA-65 key hierarchy, VC issuance and verification
 - Implement `aegis-vault` crate: per-file AEAD encryption, FUSE filesystem, vault directory structure
+- Add DID/service-record support for private node discovery
 - CLI commands: `aegis vault init`, `aegis identity new`, `aegis identity show`
 
 ### Phase 2B — Social Core
 - Implement `aegis-social` crate:
+  - Private node runtime enabled by default for each user
   - Space server: serve `vault://social/space/` over authenticated PQC tunnel
   - Space client: render received space HTML in sandboxed context
   - Character sync: transmit equipped avatar JSON to visiting peers
   - Item VC verification: validate inventory proofs on receipt
+  - Local two-node loopback testing on one machine as the first full-system proof
 - Tauri desktop app (`aegis-desktop`): space viewer/editor, character panel, inventory manager
 
 ### Phase 2C — Shared Nodes & Messaging
+- Manual peer exchange for MVP discovery
 - Shared node room server: CRDT state sync, MLS group messaging
+- Bootstrap discovery nodes outside the normal content path
 - PQ Double Ratchet DM implementation
-- Async sealed-sender message relay via Sanctuary
+- Optional async/deferred delivery relay model
 - Sanctuary node operator tooling for community-hosted rooms
 
 ### Phase 2D — Federation & Ecosystem
@@ -301,13 +335,13 @@ The guiding principle: **if it requires the user to trust us with their data or 
 
 | Social Feature | Aegis Layer | Crate | Status |
 |---|---|---|---|
-| PQC tunnel for space visits | Layer 3 | `aegis-gateway` | ✅ Implemented |
-| Sanctuary NAT for peer connections | Layer 3 | `aegis-sanctuary` | ✅ Implemented |
+| PQC tunnel foundation for direct space visits | Layer 3 | `aegis-gateway` | ✅ Implemented |
+| Sanctuary-compatible responder/server primitive | Layer 3 | `aegis-sanctuary` | ✅ Implemented |
 | Hybrid KEM, AEAD, ML-DSA-65 | Layer 2 | `aegis-crypto` | ✅ Implemented |
-| DID identity + VC item proofs | Layer 4 | `aegis-identity` | 🔲 Planned |
+| DID identity + node discovery + VC item proofs | Layer 4 | `aegis-identity` | 🔲 Planned |
 | Vault storage for all social data | Layer 5 | `aegis-vault` | 🔲 Planned |
 | Desktop/mobile app shell | Layer 6 | `aegis-desktop` | 🔲 Planned |
-| Space server, shared nodes, AP feed | Layer 7 | `aegis-social` | 🔲 Planned |
+| Private node runtime, shared nodes, AP feed | Layer 7 | `aegis-social` | 🔲 Planned |
 
 ---
 
@@ -319,10 +353,12 @@ The guiding principle: **if it requires the user to trust us with their data or 
 - **Harvest-now-decrypt-later attacks:** ML-KEM-768 + X25519 hybrid KEM renders future quantum decryption of intercepted traffic infeasible
 - **Identity impersonation:** DID-linked characters with ML-DSA-65 signatures make spoofing cryptographically detectable
 - **Asset rug-pulls:** Items stored in user vault with VC proofs — no server to take down
+- **Platform lock-in:** HTML, JSON, and user data remain user owned and locally controlled
 
 ### What the platform does not protect against:
 - **Compromised user device:** If the device is compromised, vault contents are at risk — mitigated by hardware keyring integration (TPM/Secure Enclave, planned)
 - **Malicious room code:** Custom HTML/JS is sandboxed but users should treat visited spaces like websites — exercise the same caution
+- **Bad discovery information:** Bootstrap/manual discovery can be wrong until verified against identity material
 - **Shared node operator visibility:** The operator of a shared node can see who is connected (by DID) and room-level interaction metadata, though not message content (MLS encrypted)
 - **Physical access attacks:** The vault passphrase and device PIN are the last lines of defense if the device is physically seized
 
@@ -330,5 +366,4 @@ The guiding principle: **if it requires the user to trust us with their data or 
 
 ## Summary
 
-The Aegis Social Platform is not a feature added to a privacy tool. It is the natural consumer product expression of the Aegis infrastructure — a world where your digital social life is as private, durable, and truly yours as the keys in your own pocket. The MySpace-era creativity, the Club Penguin-era playfulness, the post-quantum cryptographic guarantees of Aegis, and a free-by-default model that no centralized competitor can structurally replicate — all in one platform, built on an already-functional PQC transport layer.
-
+The Aegis Social Platform is not a feature added to a privacy tool. It is the natural consumer product expression of the Aegis infrastructure — a world where your digital social life is as private, durable, and truly yours as the keys in your own pocket. The MySpace-era creativity, the Club Penguin-era playfulness, the post-quantum cryptographic guarantees of Aegis, and a private-node-first model that no centralized competitor can structurally replicate all converge here. The transport layer exists today; the private-node social runtime described above is the intended next architecture, not a claim of present implementation.

@@ -3,13 +3,17 @@
 > **Status:** Implemented — PQ-WireGuard handshake, transport encryption,
 > anti-replay, and rekeying are functional end-to-end.
 >
-> **Last Updated:** 2026-02-10
+> **Last Updated:** 2026-04-18
 
 ## Overview
 
 The Aegis wire protocol defines the on-the-wire format for encrypted tunnel
 communication between Aegis clients and Sanctuary nodes. It is based on
 WireGuard's Noise IK pattern, extended with hybrid post-quantum key encapsulation.
+
+This document describes the **currently implemented** transport. In the intended
+private-node-first architecture, this protocol family is expected to underpin
+direct node-to-node links as well, rather than implying a mandatory platform-hosted hop.
 
 **Implementation:** [`crates/aegis-gateway/src/handshake.rs`](../crates/aegis-gateway/src/handshake.rs),
 [`crates/aegis-gateway/src/transport.rs`](../crates/aegis-gateway/src/transport.rs),

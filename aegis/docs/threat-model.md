@@ -2,13 +2,18 @@
 
 > **Status:** Active — updated to reflect implemented security properties.
 >
-> **Last Updated:** 2026-02-10
+> **Last Updated:** 2026-04-18
 
 ## Overview
 
 This document describes the threat model for Project Aegis, a post-quantum secure
 communication platform. It identifies adversary capabilities, trust boundaries,
 and the security properties each layer is designed to provide.
+
+The intended social topology is now **private-node first**: each user should be
+able to run a private node by default, connect directly to other private nodes,
+and optionally join shared Sanctuary/community nodes. The implemented transport
+security properties below are current; several node/discovery properties remain planned.
 
 ## Adversary Model
 
@@ -18,14 +23,16 @@ and the security properties each layer is designed to provide.
 | **Active Network Attacker** | Packet injection, modification, replay | AEAD authentication, transcript binding, anti-replay window (RFC 6479) |
 | **Harvest-Now-Decrypt-Later** | Store encrypted traffic for future quantum attack | ML-KEM-768 hybrid KEM (quantum-resistant) |
 | **Compromised Endpoint** | Access to one peer's memory | Zeroizing key material, ephemeral secrets, forward secrecy via rekeying |
-| **Malicious Sanctuary Node** | Modified server software | AGPLv3 source disclosure, client-side verification (Phase 2) |
+| **Malicious Shared Node Operator** | Modified optional node software, metadata observation | End-to-end encryption, client verification, self-hosting |
+| **Malicious Discovery / Bootstrap Node** | Fake, stale, or manipulative peer hints | DID verification, signed records, multiple bootstrap sources |
 
 ## Trust Boundaries
 
 1. **TUN Interface ↔ Pipeline** — Untrusted input; packets must be validated before processing.
-2. **Client ↔ Sanctuary Node** — Authenticated via PQ-WG handshake; peer authorization via allowlist.
-3. **Key Material ↔ Memory** — Secret keys must be zeroized on drop; no logging of key material.
-4. **Sanctuary ↔ Internet** — NAT proxy forwards decrypted traffic; client IP is hidden behind Sanctuary IP.
+2. **Private Node ↔ Remote Private / Shared Node** — Intended authenticated PQ transport boundary for direct visits and messaging.
+3. **Discovery / Bootstrap ↔ Client** — Discovery hints are untrusted until verified against DID/public-key material.
+4. **Key Material ↔ Memory** — Secret keys must be zeroized on drop; no logging of key material.
+5. **Sanctuary ↔ Internet** — Current transport/NAT boundary for implemented Sanctuary testing mode.
 
 ## Security Properties by Layer
 
@@ -42,10 +49,13 @@ and the security properties each layer is designed to provide.
 | L3 (Gateway) | Anti-replay (RFC 6479 sliding window) | ✅ Implemented |
 | L3 (Gateway) | Session rekeying / forward secrecy (120s / 65,536 pkts) | ✅ Implemented |
 | L3 (Gateway) | Keypair persistence (load/save to file) | ✅ Implemented |
-| Sanctuary | Responder handshake + session management | ✅ Implemented |
-| Sanctuary | Peer authorization (public-key allowlist) | ✅ Implemented |
-| Sanctuary | NAT proxy (IP forwarding for tunnel clients) | ✅ Implemented |
-| Sanctuary | Anti-replay (per-client sliding window) | ✅ Implemented |
+| Sanctuary transport primitive | Responder handshake + session management | ✅ Implemented |
+| Sanctuary transport primitive | Peer authorization (public-key allowlist) | ✅ Implemented |
+| Sanctuary transport primitive | NAT proxy (IP forwarding for tunnel clients) | ✅ Implemented |
+| Sanctuary transport primitive | Anti-replay (per-client sliding window) | ✅ Implemented |
+| Layer 7 private node default runtime | User-owned node serves vault-backed social space | ❌ Planned |
+| Layer 4/7 discovery verification | DID-linked node discovery records | ❌ Planned |
+| Layer 7 shared node participation | Optional shared/community nodes only | ❌ Planned |
 
 ## Fuzz Testing
 
@@ -62,3 +72,5 @@ Three fuzz targets exist for the crypto layer (since PR #4):
 - NAT proxy does not enforce per-client bandwidth limits.
 - Cookie Reply (`0x03`) DoS mitigation not yet implemented.
 - No `check.aegis.dev` verification endpoint.
+- No private-node social runtime yet.
+- No bootstrap discovery or DID-based node resolution implementation yet.
