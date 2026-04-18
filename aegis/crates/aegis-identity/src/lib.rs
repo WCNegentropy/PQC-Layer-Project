@@ -52,8 +52,9 @@ pub(crate) fn encode_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+#[allow(clippy::manual_is_multiple_of)]
 pub(crate) fn decode_hex(input: &str) -> Result<Vec<u8>, IdentityError> {
-    if !input.len().is_multiple_of(2) {
+    if input.len() % 2 != 0 {
         return Err(IdentityError::InvalidKey(
             "hex input must have even length".into(),
         ));

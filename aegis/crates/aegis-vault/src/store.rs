@@ -165,7 +165,21 @@ impl VaultStore {
             (
                 "social/space/index.html",
                 format!(
-                    "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>Aegis Space</title><link rel=\"stylesheet\" href=\"style.css\"></head><body><main class=\"space\"><h1>Welcome to {owner_did}</h1><p>Your private Aegis space is now hosted from your vault.</p></main></body></html>\n"
+                    r#"<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Aegis Space</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main class="space">
+      <h1>Welcome to {owner_did}</h1>
+      <p>Your private Aegis space is now hosted from your vault.</p>
+    </main>
+  </body>
+</html>
+"#
                 ),
             ),
             (
