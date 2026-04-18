@@ -4,6 +4,8 @@
 
 The **Aegis Sanctuary Server v0** is now fully implemented and ready for deployment. This completes the critical missing server-side component to enable end-to-end post-quantum encrypted tunnels.
 
+> **Architecture note (2026-04-18):** this remains a transport-layer milestone, but the intended product architecture has shifted to private nodes by default. Sanctuary is now best understood as an optional/self-hosted building block for private or shared nodes rather than a mandatory platform server.
+
 ## What Was Delivered
 
 ### 1. Core Server Implementation

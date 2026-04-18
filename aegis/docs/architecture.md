@@ -1,7 +1,7 @@
-# Project Aegis — Architecture Specification v0.3
+# Project Aegis — Architecture Specification v0.4
 
-> **Status:** Phase 1 Complete — PQ-WG tunnel works end-to-end (gateway ↔ sanctuary)
-> **Last Updated:** 2026-02-10
+> **Status:** Phase 1 transport complete — gateway ↔ sanctuary works end-to-end; private-node-first social topology is the intended next architecture
+> **Last Updated:** 2026-04-18
 > **Authors:** WCNegentropy, Copilot
 
 ---
@@ -20,6 +20,17 @@ powerful when combined.
 3. **Defense in Depth** — No single layer's compromise exposes the user.
 4. **Progressive Disclosure** — Simple app for users, configurable modules for power users, composable SDK for developers.
 
+### Architecture Direction Update
+
+Aegis is now explicitly targeting a **private-node-by-default** social topology:
+
+1. Every user will ultimately run a private Aegis node containing their vault, identity, and social space.
+2. Direct private-node-to-private-node connections are the default path for visits, messaging, and user-controlled content serving.
+3. Shared Sanctuary nodes are **opt-in** spaces that a user, community, creator, or platform operator may host.
+4. Minimal bootstrap/discovery infrastructure may exist to help peers find one another, but it should not sit in the normal content/data path.
+
+The currently implemented `aegis-gateway` and `aegis-sanctuary` crates remain transport-layer building blocks. The private-node runtime, discovery system, and social application layer described here are largely **planned**, not yet implemented.
+
 ---
 
 ## 2. System Architecture
@@ -27,10 +38,10 @@ powerful when combined.
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    LAYER 7: SOCIAL FABRIC                       │
-│         Decentralized social, messaging, collaboration          │
+│   Private nodes by default, opt-in shared nodes, federation     │
 ├─────────────────────────────────────────────────────────────────┤
 │                    LAYER 6: APPLICATION SHELL                   │
-│         Desktop/Mobile UI (Tauri), CLI, Browser Extension       │
+│      Desktop/Mobile UI (Tauri), CLI, editors, local runtime     │
 ├─────────────────────────────────────────────────────────────────┤
 │                    LAYER 5: DATA SOVEREIGNTY VAULT              │
 │         Encrypted FS (FUSE), Object Store, CRDT Sync Engine     │
@@ -75,7 +86,7 @@ aegis/
 │   │       ├── pipeline.rs         # Async packet pipeline
 │   │       ├── platform.rs         # CLI args, TUN config, root check
 │   │       └── stats.rs            # Atomic pipeline statistics (13 counters)
-│   ├── aegis-sanctuary/            # Sanctuary Node ✅ IMPLEMENTED
+│   ├── aegis-sanctuary/            # PQ-WG responder/server primitive ✅ IMPLEMENTED
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── main.rs             # Sanctuary server entry point
@@ -84,9 +95,9 @@ aegis/
 │   │       ├── proxy.rs            # NAT proxy, client IP mapping, bandwidth stats
 │   │       └── lib.rs              # Library exports
 │   ├── aegis-platform/             # Layer 1: OS abstraction (trait definitions)
-│   ├── aegis-identity/             # Layer 4: Identity (planned)
+│   ├── aegis-identity/             # Layer 4: Identity + discovery metadata (planned)
 │   ├── aegis-vault/                # Layer 5: Encrypted storage (planned)
-│   └── aegis-social/               # Layer 7: Social fabric (planned)
+│   └── aegis-social/               # Layer 7: Private/shared node social runtime (planned)
 ├── apps/
 │   ├── aegis-cli/                  # CLI: up/down/status/keygen ✅ FUNCTIONAL
 │   ├── aegis-desktop/              # Tauri desktop app (placeholder)
@@ -275,17 +286,25 @@ let pk = HybridPublicKey::from_bytes(&pk_bytes)?;
 - [ ] DNS Membrane (local resolver, DoH over tunnel)
 - [ ] `check.aegis.dev` verification endpoint
 
-### Phase 2: Identity & Vault (Weeks 13-24)
+### Phase 2: Identity, Vault, and Private Node Foundations
 - [ ] Key hierarchy (root → device → session)
 - [ ] DID (`did:aegis`) implementation
+- [ ] DID service/discovery records for private node reachability
 - [ ] Verifiable Credentials with ML-DSA-65
 - [ ] Encrypted vault storage (per-file AEAD)
 - [ ] FUSE filesystem mount
 - [ ] CRDT-based multi-device sync
+- [ ] Local private-node profile/vault layout for social content
+- [ ] Loopback test: two local Aegis instances connecting directly
 
-### Phase 3: Social Fabric (Weeks 25-36)
+### Phase 3: Social Fabric
+- [ ] Private node runtime enabled by default for each user
+- [ ] Direct private-node visits and vault-backed space serving
+- [ ] Manual peer exchange for MVP discovery
 - [ ] PQ Double Ratchet messaging
-- [ ] MLS-inspired group encryption
+- [ ] Optional shared nodes with MLS-inspired group encryption
+- [ ] Bootstrap discovery nodes outside the data path
+- [ ] DID-based node discovery / resolution
 - [ ] ActivityPub federation
 - [ ] Desktop app (Tauri 2.0)
 
@@ -295,6 +314,10 @@ let pk = HybridPublicKey::from_bytes(&pk_bytes)?;
 
 The Aegis tunnel uses a WireGuard-inspired protocol extended with hybrid
 post-quantum key encapsulation.
+
+Today this protocol is implemented for gateway ↔ Sanctuary transport. The
+intended private-node architecture is expected to reuse or adapt this transport
+for direct node-to-node connections rather than requiring a permanent platform hop.
 
 ### 7.1 Handshake (Noise IK + Hybrid KEM)
 
@@ -338,33 +361,55 @@ is ~10× slower than classical WireGuard).
 
 ---
 
-## 8. Sanctuary Network — ✅ IMPLEMENTED
+## 8. Node Topology & Sanctuary Role
 
-The Sanctuary is a network of PQ-WG termination servers that provide:
+### 8.1 Intended Topology (Planned)
 
-1. **IP Privacy** — Client traffic exits through the Sanctuary's IP.
-2. **DNS Oblivion** — DNS queries are resolved by the Sanctuary, not the ISP.
-3. **NAT Proxy** — Stateful NAT with client IP mapping and bandwidth tracking.
-
-### 8.1 Deployment Model
+The target social architecture is:
 
 ```text
-┌─────────┐     PQ-WG      ┌──────────────┐      NAT      ┌──────────┐
-│  Aegis  │ ──────────────▶ │  Sanctuary   │ ────────────▶ │ Internet │
-│  Client │   UDP tunnel    │    Node      │   cleartext   │          │
-└─────────┘                 └──────────────┘               └──────────┘
+Default path:
+┌──────────────────┐      direct PQC tunnel      ┌──────────────────┐
+│ User A Private   │ ───────────────────────────▶ │ User B Private   │
+│ Node / Vault     │                              │ Node / Vault     │
+└──────────────────┘                              └──────────────────┘
+
+Optional shared space:
+┌──────────────────┐      PQC tunnel             ┌──────────────────┐
+│ User A Private   │ ───────────────────────────▶ │ Shared Sanctuary │
+│ Node / Vault     │                              │ / Community Node │
+└──────────────────┘                              └──────────────────┘
 ```
 
-Sanctuary nodes can run as Docker containers with minimal attack surface:
-- Multi-stage build (`Dockerfile.sanctuary`)
-- Non-root user (`aegis`, UID 1000)
-- Resource limits (1 CPU, 512 MB memory via `docker-compose.sanctuary.yml`)
-- Health check (`pgrep -f aegis-sanctuary`)
-- Structured JSON logging
+Core implications:
 
-### 8.2 Server Architecture
+1. The user's private node becomes the default Aegis runtime for identity, vault-backed content, and direct social interaction.
+2. Shared Sanctuary nodes are not mandatory coordination hops; they are optional rooms/events/community spaces.
+3. The core product should remain functional with only user-run nodes.
+4. Any bootstrap/discovery infrastructure should help peers find one another without becoming a content host or permanent dependency.
 
-The Sanctuary server (`aegis-sanctuary`) consists of:
+### 8.2 Discovery Model (Planned)
+
+Discovery is the main new systems problem introduced by the private-node-first design.
+
+Planned progression:
+
+1. **Manual exchange (MVP):** users share node address + public identity material directly.
+2. **Bootstrap discovery nodes:** minimal well-known nodes provide peer hints but are not in the data path.
+3. **DID document resolution:** `did:aegis` records advertise current node/discovery endpoints.
+
+### 8.3 Sanctuary Role in the New Architecture
+
+`aegis-sanctuary` remains important, but its role changes:
+
+- it is no longer assumed to be a mandatory platform hop for normal user-to-user interaction,
+- it can be reused or adapted as the transport/server primitive for self-hosted private nodes,
+- it can power opt-in shared/community/platform spaces,
+- it may support optional bootstrap or relay-style infrastructure later, but those services are not prerequisites for the core product.
+
+### 8.4 Current Implemented Transport Primitive — ✅ IMPLEMENTED
+
+The current Sanctuary server (`aegis-sanctuary`) consists of:
 
 | Module | Role |
 |--------|------|
@@ -373,7 +418,7 @@ The Sanctuary server (`aegis-sanctuary`) consists of:
 | `proxy.rs` | NAT proxy, per-client IP mapping, bandwidth statistics |
 | `main.rs` | Entry point, Ctrl+C shutdown handler |
 
-### 8.3 Configuration (`sanctuary.toml`)
+Current configuration:
 
 ```toml
 [server]
@@ -383,11 +428,7 @@ log_level = "info"
 authorized_peers_dir = "peers/"    # Optional: directory of peer public keys
 ```
 
-### 8.4 Peer Authorization
-
-Each client registers its hybrid public key with the Sanctuary. Only
-authorized peers can establish tunnels. Unauthorized handshake attempts
-receive no response (silent drop to prevent enumeration).
+This implemented transport layer is useful for current testing, but it should not be confused with the future fully user-controlled private-node social runtime.
 
 ---
 
@@ -414,12 +455,13 @@ did:aegis:z6MkhaXgBZDvotDkL...
 The DID document contains:
 - ML-DSA-65 public key (verification)
 - ML-KEM-768 public key (key agreement)
-- Service endpoints (Sanctuary addresses)
+- Service endpoints / discovery records for a user's private node
+- Optional shared-node memberships or published room endpoints
 
 ### 9.3 Verifiable Credentials
 
 W3C VC format signed with ML-DSA-65. Use cases:
-- Proving device ownership to a Sanctuary
+- Proving device ownership to a private node or optional shared node
 - Peer identity verification for social messaging
 - Authorization for vault access delegation
 
@@ -464,6 +506,12 @@ Multi-device sync uses CRDTs (Conflict-free Replicated Data Types):
 ---
 
 ## 11. Social Fabric (Layer 7)
+
+### 11.0 Default Social Runtime
+
+The intended Layer 7 runtime is a user's **private node**, not a platform-owned server.
+Their vault, profile, room HTML/JSON, inventory, and messaging state live there by
+default. Shared rooms are additive, opt-in spaces layered on top of that baseline.
 
 ### 11.1 PQ Double Ratchet
 
@@ -519,15 +567,17 @@ ActivityPub extensions for Aegis:
 | Active Network Attacker   | Injection, modification, replay      | AEAD auth, transcript binding, counters  |
 | Harvest-Now-Decrypt-Later | Store ciphertext for quantum attack  | ML-KEM-768 hybrid KEM                    |
 | Compromised Endpoint      | Memory access on one peer            | Zeroizing keys, ephemeral secrets        |
-| Malicious Sanctuary       | Modified server software             | Client-side verification, open source    |
+| Malicious Shared Node     | Modified optional node software      | Client-side verification, open source    |
+| Malicious Discovery Node  | Fake or stale peer hints             | DID verification, signed records, retry  |
 | Supply Chain Attack       | Compromised dependencies             | `cargo-audit`, reproducible builds       |
 
 ### 13.2 Trust Boundaries
 
 1. **TUN ↔ Pipeline** — Untrusted input; all packets validated before processing.
-2. **Client ↔ Sanctuary** — Mutually authenticated via PQ-WG handshake.
-3. **Key Material ↔ Memory** — Zeroized on drop; never logged.
-4. **Vault ↔ Filesystem** — Encrypted at rest; plaintext only in FUSE buffer.
+2. **Private Node ↔ Remote Private/Shared Node** — Intended to be mutually authenticated via PQ transport + identity checks.
+3. **Discovery/Bootstrap ↔ Client** — Hints are untrusted until verified against identity material.
+4. **Key Material ↔ Memory** — Zeroized on drop; never logged.
+5. **Vault ↔ Filesystem** — Encrypted at rest; plaintext only in FUSE buffer.
 
 ---
 

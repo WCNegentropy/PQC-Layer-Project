@@ -1,12 +1,14 @@
 # Aegis Sanctuary Server
 
-The **Sanctuary** is the server-side component of the Aegis PQ-WireGuard tunnel system. It accepts quantum-resistant encrypted connections from Aegis Gateway clients and provides secure internet access.
+The **Sanctuary** is the current server-side component of the Aegis PQ-WireGuard tunnel system. It accepts quantum-resistant encrypted connections from Aegis Gateway clients and provides secure internet access.
+
+In the intended private-node-first Aegis architecture, this crate should be understood as a **transport/server primitive**, not as evidence that the product requires a central platform hop. Every user is expected to have their own private node by default, while shared Sanctuary/community nodes are opt-in.
 
 ## Architecture
 
 ```
-Client (Gateway) ──PQ-WG/UDP──▶ Sanctuary ──NAT──▶ Internet
-   (ML-KEM-768 + X25519)          (Server)
+Client / Private Node ──PQ-WG/UDP──▶ Sanctuary-compatible responder ──NAT/room/relay role
+       (current transport layer)         (self-hosted or optional shared node)
 ```
 
 ## Features
@@ -106,6 +108,8 @@ aegis-gateway \
   --sanctuary-pk-file sanctuary.key.pub \
   --keypair-file client.key
 ```
+
+This is the **currently implemented** connection model. The planned social architecture layers direct private-node-to-private-node visits and optional shared-node participation on top of this transport foundation.
 
 ## Authorized Peers (Optional)
 
