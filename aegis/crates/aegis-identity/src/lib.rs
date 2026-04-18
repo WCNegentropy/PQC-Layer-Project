@@ -53,7 +53,7 @@ pub(crate) fn encode_hex(bytes: &[u8]) -> String {
 }
 
 pub(crate) fn decode_hex(input: &str) -> Result<Vec<u8>, IdentityError> {
-    if input.len() % 2 != 0 {
+    if !input.len().is_multiple_of(2) {
         return Err(IdentityError::InvalidKey(
             "hex input must have even length".into(),
         ));
