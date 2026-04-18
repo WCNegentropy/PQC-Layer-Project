@@ -95,8 +95,8 @@ aegis/
 │   │       ├── proxy.rs            # NAT proxy, client IP mapping, bandwidth stats
 │   │       └── lib.rs              # Library exports
 │   ├── aegis-platform/             # Layer 1: OS abstraction (trait definitions)
-│   ├── aegis-identity/             # Layer 4: Identity + discovery metadata (planned)
-│   ├── aegis-vault/                # Layer 5: Encrypted storage (planned)
+│   ├── aegis-identity/             # Layer 4: Identity + discovery metadata ✅ foundations
+│   ├── aegis-vault/                # Layer 5: Encrypted storage ✅ foundations
 │   └── aegis-social/               # Layer 7: Private/shared node social runtime (planned)
 ├── apps/
 │   ├── aegis-cli/                  # CLI: up/down/status/keygen ✅ FUNCTIONAL
@@ -287,14 +287,14 @@ let pk = HybridPublicKey::from_bytes(&pk_bytes)?;
 - [ ] `check.aegis.dev` verification endpoint
 
 ### Phase 2: Identity, Vault, and Private Node Foundations
-- [ ] Key hierarchy (root → device → session)
-- [ ] DID (`did:aegis`) implementation
-- [ ] DID service/discovery records for private node reachability
-- [ ] Verifiable Credentials with ML-DSA-65
-- [ ] Encrypted vault storage (per-file AEAD)
+- [x] Key hierarchy (root → device → session) foundations
+- [x] DID (`did:aegis`) implementation
+- [x] DID service/discovery records for private node reachability
+- [x] Verifiable Credentials with ML-DSA-65
+- [x] Encrypted vault storage (per-file AEAD)
 - [ ] FUSE filesystem mount
 - [ ] CRDT-based multi-device sync
-- [ ] Local private-node profile/vault layout for social content
+- [x] Local private-node profile/vault layout for social content
 - [ ] Loopback test: two local Aegis instances connecting directly
 
 ### Phase 3: Social Fabric
@@ -437,19 +437,24 @@ This implemented transport layer is useful for current testing, but it should no
 ### 9.1 Key Hierarchy
 
 ```text
-Root Keypair (ML-DSA-65 + Ed25519)
-├── Device Key (HKDF-SHA3-256, per device)
-│   ├── Session Key (ephemeral, per connection)
-│   └── Storage Key (for vault master key derivation)
-└── Recovery Key (Shamir secret sharing, offline backup)
+Root identity (ML-DSA-65 signing + hybrid KEM)
+├── Device identity (issued and attested by root signing key)
+│   ├── Session key material (context-derived from device exchange secret)
+│   └── Storage key material (device-local derivation)
+└── Recovery / backup flow (still planned)
 ```
+
+Current implementation:
+- `RootIdentity::generate()` creates root signing + hybrid key-agreement material.
+- `RootIdentity::issue_device()` generates a primary device identity and signs a device VC.
+- `DeviceIdentity::derive_session_key()` / `derive_storage_key()` provide local key-hierarchy primitives for subsequent layers.
 
 ### 9.2 Decentralized Identifiers
 
-Aegis uses a `did:aegis` method:
+Aegis currently uses a local `did:aegis` method derived from the root signing public key:
 
 ```
-did:aegis:z6MkhaXgBZDvotDkL...
+did:aegis:<sha3-256(root-signing-public-key)>
 ```
 
 The DID document contains:
@@ -458,12 +463,16 @@ The DID document contains:
 - Service endpoints / discovery records for a user's private node
 - Optional shared-node memberships or published room endpoints
 
+Current implementation note: local DID documents are emitted as JSON by the CLI and can already advertise manual private-node endpoints for MVP discovery.
+
 ### 9.3 Verifiable Credentials
 
 W3C VC format signed with ML-DSA-65. Use cases:
 - Proving device ownership to a private node or optional shared node
 - Peer identity verification for social messaging
 - Authorization for vault access delegation
+
+Current implementation note: the `aegis-identity` crate now issues and verifies ML-DSA-65-signed device credentials and challenge/response payloads.
 
 ---
 
@@ -488,11 +497,18 @@ Encryption uses ChaCha20-Poly1305 AEAD with a random nonce per write.
 ```text
 vault/
 ├── .aegis/
-│   ├── metadata.db          # Encrypted SQLite (file index, CRDT state)
-│   └── keys/                # Encrypted key material
-├── 00/                      # Content-addressed blob storage
-│   ├── aa/
-│   │   └── 00aabb...hex     # Encrypted file blob
+│   ├── manifest.json        # Encrypted-file manifest and logical path metadata
+│   ├── blobs/               # Encrypted blob storage
+│   │   ├── aa/
+│   │   │   └── aa...hex.blob
+│   │   └── ...
+│   └── keys/                # Vault master key and related material
+├── social/
+│   ├── space/
+│   ├── character/
+│   ├── inventory/
+│   ├── profile/
+│   └── feed/
 │   └── ...
 ```
 
@@ -502,6 +518,8 @@ Multi-device sync uses CRDTs (Conflict-free Replicated Data Types):
 - **File operations:** LWW-Register (last-writer-wins by timestamp)
 - **Directory structure:** OR-Set (observed-remove set)
 - **Conflict resolution:** Automatic via CRDT semantics; no user intervention
+
+Current implementation note: `aegis-vault` now includes an encrypted per-file store and a `SyncSnapshot` merge primitive, while a full networked CRDT sync engine remains planned.
 
 ---
 

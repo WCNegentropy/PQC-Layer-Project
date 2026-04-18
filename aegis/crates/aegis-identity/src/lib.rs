@@ -36,6 +36,40 @@ pub enum IdentityError {
     /// Cryptographic operation error (delegated from aegis-crypto).
     #[error("crypto error: {0}")]
     CryptoError(String),
+
+    /// Serialization or deserialization error.
+    #[error("serialization error: {0}")]
+    Serialization(String),
+}
+
+impl From<aegis_crypto::CryptoError> for IdentityError {
+    fn from(value: aegis_crypto::CryptoError) -> Self {
+        Self::CryptoError(value.to_string())
+    }
+}
+
+pub(crate) fn encode_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[allow(clippy::manual_is_multiple_of)]
+pub(crate) fn decode_hex(input: &str) -> Result<Vec<u8>, IdentityError> {
+    if input.len() % 2 != 0 {
+        return Err(IdentityError::InvalidKey(
+            "hex input must have even length".into(),
+        ));
+    }
+
+    input
+        .as_bytes()
+        .chunks(2)
+        .map(|chunk| {
+            let value = std::str::from_utf8(chunk)
+                .map_err(|_| IdentityError::InvalidKey("invalid UTF-8 in hex data".into()))?;
+            u8::from_str_radix(value, 16)
+                .map_err(|_| IdentityError::InvalidKey("invalid hex character".into()))
+        })
+        .collect()
 }
 
 #[cfg(test)]

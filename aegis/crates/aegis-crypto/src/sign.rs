@@ -39,6 +39,11 @@ impl SigningKeypair {
         self.public_key.as_bytes().to_vec()
     }
 
+    /// Get a zeroizing copy of the secret key bytes.
+    pub fn secret_key_bytes(&self) -> Zeroizing<Vec<u8>> {
+        Zeroizing::new(self.secret_key_bytes.to_vec())
+    }
+
     /// Sign a message, returning the detached signature bytes.
     pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let sk = mldsa65::SecretKey::from_bytes(&self.secret_key_bytes)

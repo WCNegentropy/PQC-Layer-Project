@@ -54,7 +54,7 @@ security properties below are current; several node/discovery properties remain 
 | Sanctuary transport primitive | NAT proxy (IP forwarding for tunnel clients) | ✅ Implemented |
 | Sanctuary transport primitive | Anti-replay (per-client sliding window) | ✅ Implemented |
 | Layer 7 private node default runtime | User-owned node serves vault-backed social space | ❌ Planned |
-| Layer 4/7 discovery verification | DID-linked node discovery records | ❌ Planned |
+| Layer 4/7 discovery verification | Local DID documents + signed service records for manual discovery | 🟡 Foundation implemented |
 | Layer 7 shared node participation | Optional shared/community nodes only | ❌ Planned |
 
 ## Fuzz Testing

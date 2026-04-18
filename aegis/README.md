@@ -93,6 +93,8 @@ Run the CLI tool:
 ```bash
 cargo run -p aegis-cli -- status
 cargo run -p aegis-cli -- keygen
+cargo run -p aegis-cli -- identity new --identity-dir .aegis/identity
+cargo run -p aegis-cli -- vault init --vault-dir vault --identity-dir .aegis/identity
 cargo run -p aegis-cli -- up --server 127.0.0.1:51820 --interface aegis0
 cargo run -p aegis-cli -- down --interface aegis0
 ```
@@ -131,11 +133,15 @@ OS abstraction layer: TUN device, keyring, entropy, and filesystem trait definit
 ### aegis-identity
 
 Identity and authentication management system with support for decentralized
-identity, DID-based peer discovery, and verifiable credentials.
+identity, DID-based peer discovery, verifiable credentials, and signed
+challenge/response authentication. Current foundations include local
+`did:aegis` document generation, service records, root→device identity issuance,
+and ML-DSA-65-signed credentials.
 
 ### aegis-vault
 
-Secure data storage and retrieval with end-to-end encryption.
+Secure data storage and retrieval with per-file AEAD encryption, logical-path
+key derivation, and bootstrap creation of the private-node social vault layout.
 
 ### aegis-social
 

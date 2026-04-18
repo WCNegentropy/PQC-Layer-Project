@@ -1,9 +1,10 @@
 //! Aegis CLI Application
 //!
 //! Command-line interface for the Aegis platform.
-//! Provides `aegis up`, `aegis down`, `aegis status`, and `aegis keygen` commands.
+//! Provides tunnel commands plus identity and vault bootstrap flows.
 
 use clap::{Parser, Subcommand};
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(
@@ -49,6 +50,61 @@ enum Commands {
         /// Output file for the secret key.
         #[arg(long, default_value = "aegis.key")]
         privkey: String,
+    },
+
+    /// Manage local DID identity material.
+    Identity {
+        #[command(subcommand)]
+        command: IdentityCommands,
+    },
+
+    /// Manage the local encrypted vault.
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum IdentityCommands {
+    /// Create a new local root identity, DID document, and primary device.
+    New {
+        /// Directory where identity files should be stored.
+        #[arg(long, default_value = ".aegis/identity")]
+        identity_dir: String,
+
+        /// Name for the initial device record.
+        #[arg(long, default_value = "default-device")]
+        device_name: String,
+
+        /// Discovery endpoints to publish in the DID document.
+        #[arg(long = "endpoint")]
+        endpoints: Vec<String>,
+    },
+
+    /// Show the current DID document and primary device attestation.
+    Show {
+        /// Directory containing identity files.
+        #[arg(long, default_value = ".aegis/identity")]
+        identity_dir: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum VaultCommands {
+    /// Initialize a new encrypted vault and bootstrap the social layout.
+    Init {
+        /// Directory where the vault should be created.
+        #[arg(long, default_value = "vault")]
+        vault_dir: String,
+
+        /// Identity directory to read the owner DID from when --owner-did is omitted.
+        #[arg(long, default_value = ".aegis/identity")]
+        identity_dir: String,
+
+        /// Explicit DID to use as the vault owner.
+        #[arg(long)]
+        owner_did: Option<String>,
     },
 }
 
@@ -187,6 +243,36 @@ fn main() {
             println!("   Private key: {} bytes → {}", sk_bytes.len(), privkey);
             println!("   ✅ Keypair written to disk");
         }
+        Commands::Identity { command } => match command {
+            IdentityCommands::New {
+                identity_dir,
+                device_name,
+                endpoints,
+            } => {
+                if let Err(err) = run_identity_new(&identity_dir, &device_name, &endpoints) {
+                    eprintln!("Failed to create identity: {err}");
+                    std::process::exit(1);
+                }
+            }
+            IdentityCommands::Show { identity_dir } => {
+                if let Err(err) = run_identity_show(&identity_dir) {
+                    eprintln!("Failed to show identity: {err}");
+                    std::process::exit(1);
+                }
+            }
+        },
+        Commands::Vault { command } => match command {
+            VaultCommands::Init {
+                vault_dir,
+                identity_dir,
+                owner_did,
+            } => {
+                if let Err(err) = run_vault_init(&vault_dir, &identity_dir, owner_did.as_deref()) {
+                    eprintln!("Failed to initialize vault: {err}");
+                    std::process::exit(1);
+                }
+            }
+        },
     }
 }
 
@@ -279,4 +365,172 @@ fn resolve_gateway_binary() -> String {
 
     // Fall back to PATH
     "aegis-gateway".to_string()
+}
+
+fn run_identity_new(
+    identity_dir: &str,
+    device_name: &str,
+    endpoints: &[String],
+) -> Result<(), String> {
+    let identity_path = PathBuf::from(identity_dir);
+    if identity_path.join("did.txt").exists() {
+        return Err(format!(
+            "identity already exists at {}",
+            identity_path.display()
+        ));
+    }
+    std::fs::create_dir_all(&identity_path).map_err(|err| err.to_string())?;
+
+    let root = aegis_identity::keys::RootIdentity::generate();
+    let services = if endpoints.is_empty() {
+        vec![aegis_identity::did::ServiceEndpoint {
+            id: "#primary-node".into(),
+            service_type: "AegisNode".into(),
+            endpoint: "udp://127.0.0.1:51820".into(),
+        }]
+    } else {
+        endpoints
+            .iter()
+            .enumerate()
+            .map(|(index, endpoint)| aegis_identity::did::ServiceEndpoint {
+                id: format!("#node-{}", index + 1),
+                service_type: "AegisNode".into(),
+                endpoint: endpoint.clone(),
+            })
+            .collect()
+    };
+    let document = root.document(services);
+    let device = root
+        .issue_device(device_name)
+        .map_err(|err| err.to_string())?;
+    let did = root.did().as_str().to_string();
+
+    write_secure_file(
+        &identity_path.join("root-signing.key"),
+        &root.signing_keypair().secret_key_bytes(),
+    )?;
+    std::fs::write(
+        identity_path.join("root-signing.pub"),
+        root.signing_keypair().public_key_bytes(),
+    )
+    .map_err(|err| err.to_string())?;
+    write_secure_file(
+        &identity_path.join("root-exchange.key"),
+        &root.exchange_secret_key().to_bytes(),
+    )?;
+    std::fs::write(
+        identity_path.join("root-exchange.pub"),
+        root.exchange_public_key().to_bytes(),
+    )
+    .map_err(|err| err.to_string())?;
+
+    write_secure_file(
+        &identity_path.join("device-signing.key"),
+        &device.signing_keypair().secret_key_bytes(),
+    )?;
+    std::fs::write(
+        identity_path.join("device-signing.pub"),
+        device.signing_keypair().public_key_bytes(),
+    )
+    .map_err(|err| err.to_string())?;
+    write_secure_file(
+        &identity_path.join("device-exchange.key"),
+        &device.exchange_secret_key().to_bytes(),
+    )?;
+    std::fs::write(
+        identity_path.join("device-exchange.pub"),
+        device.exchange_public_key().to_bytes(),
+    )
+    .map_err(|err| err.to_string())?;
+    std::fs::write(identity_path.join("did.txt"), &did).map_err(|err| err.to_string())?;
+    std::fs::write(identity_path.join("device-name.txt"), device.device_name())
+        .map_err(|err| err.to_string())?;
+    std::fs::write(
+        identity_path.join("did-document.json"),
+        document.to_pretty_json().map_err(|err| err.to_string())?,
+    )
+    .map_err(|err| err.to_string())?;
+    std::fs::write(
+        identity_path.join("device-credential.json"),
+        serde_json::to_string_pretty(device.attestation()).map_err(|err| err.to_string())?,
+    )
+    .map_err(|err| err.to_string())?;
+
+    println!("🪪 Created local Aegis identity");
+    println!("   DID:        {did}");
+    println!("   Identity:   {}", identity_path.display());
+    println!("   Device DID: {}", device.device_did());
+    println!("   ✅ DID document and device credential written");
+    Ok(())
+}
+
+fn run_identity_show(identity_dir: &str) -> Result<(), String> {
+    let identity_path = PathBuf::from(identity_dir);
+    let did =
+        std::fs::read_to_string(identity_path.join("did.txt")).map_err(|err| err.to_string())?;
+    let document_json = std::fs::read_to_string(identity_path.join("did-document.json"))
+        .map_err(|err| err.to_string())?;
+    let document: aegis_identity::did::DidDocument =
+        serde_json::from_str(&document_json).map_err(|err| err.to_string())?;
+    let credential_json = std::fs::read_to_string(identity_path.join("device-credential.json"))
+        .map_err(|err| err.to_string())?;
+    let credential: aegis_identity::credentials::Credential =
+        serde_json::from_str(&credential_json).map_err(|err| err.to_string())?;
+    credential.verify().map_err(|err| err.to_string())?;
+
+    println!("🪪 Aegis Identity");
+    println!("   DID:        {}", did.trim());
+    println!("   Services:   {}", document.service.len());
+    for service in &document.service {
+        println!("   - {} → {}", service.service_type, service.endpoint);
+    }
+    println!("   Device VC:  verified");
+    println!("   Subject:    {}", credential.subject);
+    Ok(())
+}
+
+fn run_vault_init(
+    vault_dir: &str,
+    identity_dir: &str,
+    owner_did: Option<&str>,
+) -> Result<(), String> {
+    let owner_did = match owner_did {
+        Some(owner_did) => owner_did.to_string(),
+        None => read_owner_did(identity_dir)?,
+    };
+    let vault_path = PathBuf::from(vault_dir);
+    let master_key = aegis_vault::store::VaultStore::generate_master_key();
+    let vault = aegis_vault::store::VaultStore::init(&vault_path, &master_key)
+        .map_err(|err| err.to_string())?;
+    write_secure_file(&vault_path.join(".aegis/keys/master.key"), &master_key)?;
+    let created = vault
+        .initialize_social_layout(&owner_did)
+        .map_err(|err| err.to_string())?;
+
+    println!("🗄️  Initialized encrypted Aegis vault");
+    println!("   Owner DID:  {owner_did}");
+    println!("   Vault:      {}", vault_path.display());
+    println!("   Files:      {}", created.len());
+    println!("   ✅ Social layout bootstrapped");
+    Ok(())
+}
+
+fn read_owner_did(identity_dir: &str) -> Result<String, String> {
+    std::fs::read_to_string(PathBuf::from(identity_dir).join("did.txt"))
+        .map(|value| value.trim().to_string())
+        .map_err(|err| err.to_string())
+}
+
+fn write_secure_file(path: &Path, contents: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    std::fs::write(path, contents).map_err(|err| err.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|err| err.to_string())?;
+    }
+    Ok(())
 }
