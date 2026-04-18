@@ -21,6 +21,8 @@ cd aegis
 cargo test --workspace             # Run all 90+ tests
 cargo run -p aegis-cli -- status   # Show crypto status
 cargo run -p aegis-cli -- keygen   # Generate hybrid keypair
+cargo run -p aegis-cli -- identity new --identity-dir .aegis/identity
+cargo run -p aegis-cli -- vault init --vault-dir vault --identity-dir .aegis/identity
 
 # Start the Sanctuary server
 cargo run -p aegis-sanctuary -- --config sanctuary.toml

@@ -34,15 +34,15 @@ The project is organized as a 7-layer Rust workspace:
 | `aegis-platform` | L1 | TUN/Keyring/Entropy/FS traits | Trait definitions |
 | `aegis-crypto` | L2 | Hybrid KEM, AEAD, ML-DSA-65 signatures | ✅ Implemented |
 | `aegis-gateway` | L3 | PQ-WG tunnel client: TUN, handshake, transport, anti-replay, rekeying | ✅ Implemented |
-| `aegis-identity` | L4 | DIDs, key hierarchy, VCs, discovery/auth | Module stubs |
-| `aegis-vault` | L5 | Encrypted storage, FUSE, CRDT sync | Module stubs |
+| `aegis-identity` | L4 | DIDs, key hierarchy, VCs, discovery/auth | ✅ Foundation implemented |
+| `aegis-vault` | L5 | Encrypted storage, FUSE, CRDT sync | ✅ Foundation implemented |
 | `aegis-social` | L7 | Private-node social runtime, optional shared nodes, federation | Module stubs |
 | `aegis-sanctuary` | — | Current PQ-WG responder/server for optional/private/shared node roles | ✅ Implemented |
 
 ### Applications
 | App | Description | Status |
 |-----|-------------|--------|
-| `aegis-cli` | CLI: `aegis up/down/status/keygen` | ✅ Functional |
+| `aegis-cli` | CLI: `aegis up/down/status/keygen`, `identity new/show`, `vault init` | ✅ Functional |
 | `aegis-desktop` | Tauri 2.0 desktop app | Placeholder |
 | `aegis-web` | Axum web server | Placeholder |
 
@@ -59,6 +59,8 @@ cargo test --workspace
 # Use the CLI
 cargo run -p aegis-cli -- status
 cargo run -p aegis-cli -- keygen
+cargo run -p aegis-cli -- identity new --identity-dir .aegis/identity
+cargo run -p aegis-cli -- vault init --vault-dir vault --identity-dir .aegis/identity
 
 # Run the gateway (requires root and Sanctuary server)
 sudo cargo run -p aegis-gateway -- \

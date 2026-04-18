@@ -300,10 +300,11 @@ The guiding principle: **if it is core to user sovereignty, it is free and user-
 ## Implementation Roadmap
 
 ### Phase 2A — Identity Foundation (prerequisite)
-- Implement `aegis-identity` crate: DID generation (`did:aegis`), ML-DSA-65 key hierarchy, VC issuance and verification
-- Implement `aegis-vault` crate: per-file AEAD encryption, FUSE filesystem, vault directory structure
-- Add DID/service-record support for private node discovery
-- CLI commands: `aegis vault init`, `aegis identity new`, `aegis identity show`
+- ✅ Implemented foundational `aegis-identity` support: local `did:aegis` generation, root→device identity issuance, ML-DSA-65 VC issuance/verification, and signed auth challenges
+- ✅ Implemented foundational `aegis-vault` support: per-file AEAD encryption and bootstrap creation of the social vault directory structure
+- ✅ Implemented local DID/service-record support for manual private-node discovery bootstrap
+- ✅ Added CLI commands: `aegis vault init`, `aegis identity new`, `aegis identity show`
+- ⏳ Still planned for later in Phase 2A: production FUSE mount, full CRDT sync engine, recovery flows, and multi-node loopback proof
 
 ### Phase 2B — Social Core
 - Implement `aegis-social` crate:
@@ -338,8 +339,8 @@ The guiding principle: **if it is core to user sovereignty, it is free and user-
 | PQC tunnel foundation for direct space visits | Layer 3 | `aegis-gateway` | ✅ Implemented |
 | Sanctuary-compatible responder/server primitive | Layer 3 | `aegis-sanctuary` | ✅ Implemented |
 | Hybrid KEM, AEAD, ML-DSA-65 | Layer 2 | `aegis-crypto` | ✅ Implemented |
-| DID identity + node discovery + VC item proofs | Layer 4 | `aegis-identity` | 🔲 Planned |
-| Vault storage for all social data | Layer 5 | `aegis-vault` | 🔲 Planned |
+| DID identity + node discovery + VC item proofs | Layer 4 | `aegis-identity` | 🟡 Foundation implemented |
+| Vault storage for all social data | Layer 5 | `aegis-vault` | 🟡 Foundation implemented |
 | Desktop/mobile app shell | Layer 6 | `aegis-desktop` | 🔲 Planned |
 | Private node runtime, shared nodes, AP feed | Layer 7 | `aegis-social` | 🔲 Planned |
 
