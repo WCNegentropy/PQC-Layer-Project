@@ -1,5 +1,3 @@
-Aegis_OS_Browser_Plan
-
 # Aegis OS / Browser / Runtime Expansion Plan
 ## Repo-Based Phased Implementation Plan for `WCNegentropy/PQC-Layer-Project`
 **Based on current repository state as of 2026-04-21**
