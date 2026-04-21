@@ -1,0 +1,1316 @@
+Aegis_OS_Browser_Plan
+
+# Aegis OS / Browser / Runtime Expansion Plan
+## Repo-Based Phased Implementation Plan for `WCNegentropy/PQC-Layer-Project`
+**Based on current repository state as of 2026-04-21**
+
+---
+
+## 1. Executive Summary
+
+The current repository is **not starting from zero**. It already contains a meaningful and usable foundation across the lower layers of the Aegis stack:
+
+- **Layer 2 crypto is implemented**
+- **Layer 3 transport is implemented**
+- **Sanctuary server exists and is deployable**
+- **Identity foundations are implemented**
+- **Vault foundations are implemented**
+- **CLI flows for identity/vault bootstrap exist**
+- **Desktop app, web app, FUSE mount, full CRDT sync, and social runtime remain mostly planned or placeholder**
+
+That means it should not be treated as a greenfield vision anymore. Instead, it should be expanded into **repo-grounded delivery** that turns the current Aegis codebase into:
+
+1. a **private-node runtime**,
+2. an **Aegis Browser** built from the Tauri desktop app,
+3. a **vault-backed local application environment**,
+4. a **shared-node and messaging system**,
+5. and only later, a dedicated **immutable AegisOS distribution**.
+
+The most important implementation reality visible in the current repo is this:
+
+- `aegis-gateway` and `aegis-sanctuary` are the most mature parts of the platform.
+- `aegis-identity` and `aegis-vault` provide real foundations, but are not yet production-complete.
+- `aegis-social`, `aegis-desktop`, and `aegis-web` are still largely scaffolds/placeholders.
+- Therefore, the correct path is **not** “build an OS now,” but:
+  - finish the **private-node substrate**,
+  - build the **browser/runtime shell**,
+  - then harden into a dedicated appliance/immutable distro.
+
+---
+
+## 2. Current Repository Reality
+
+## 2.1 Confirmed Current Workspace Structure
+
+The workspace already includes these members:
+
+- `crates/aegis-crypto`
+- `crates/aegis-gateway`
+- `crates/aegis-platform`
+- `crates/aegis-identity`
+- `crates/aegis-vault`
+- `crates/aegis-social`
+- `crates/aegis-sanctuary`
+- `apps/aegis-desktop`
+- `apps/aegis-cli`
+- `apps/aegis-web`
+
+This is defined in `aegis/Cargo.toml`.
+
+## 2.2 Current Maturity by Area
+
+### Mature / implemented enough to build on
+- **`aegis-crypto`**
+  - Hybrid KEM and signature foundation are documented as implemented.
+- **`aegis-gateway`**
+  - PQ-WG tunnel client is implemented.
+  - Handshake, transport encryption, anti-replay, and rekey triggers are in place per docs.
+- **`aegis-sanctuary`**
+  - Server primitive exists and is documented as completed for v0.
+  - Includes config, session management, responder logic, Docker deployment, tests.
+
+### Foundation implemented, but not yet complete for product use
+- **`aegis-identity`**
+  - Root identity generation exists.
+  - Device issuance exists.
+  - DID document generation exists.
+  - VC issuance/verification foundations exist.
+  - Auth challenge/response exists.
+  - Still needs promotion into full node/login/auth substrate.
+- **`aegis-vault`**
+  - `VaultStore` exists and performs per-file AEAD encryption.
+  - Social vault bootstrap exists.
+  - `SyncSnapshot` merge primitive exists.
+  - `mount.rs` is still a placeholder.
+  - `sync.rs` is still a minimal snapshot abstraction, not a networked sync engine.
+
+### Placeholder / planned
+- **`aegis-social`**
+  - Only module skeleton and error types are present.
+- **`aegis-desktop`**
+  - Placeholder executable only.
+- **`aegis-web`**
+  - Placeholder executable only.
+
+## 2.3 Important Existing Functional Flows
+
+The repo already proves some critical lifecycle pieces:
+
+### Identity bootstrap
+The CLI supports:
+- `aegis identity new`
+- `aegis identity show`
+
+### Vault bootstrap
+The CLI supports:
+- `aegis vault init`
+
+The `phase2.rs` tests confirm:
+- identity creation works,
+- vault initialization works,
+- social profile bootstrap files are written into the encrypted vault,
+- and the owner DID is embedded into profile data.
+
+This is important because it means Aegis already has the seed of a **private node bootstrap path**:
+1. create identity,
+2. create vault,
+3. populate initial user-owned social layout.
+
+That is exactly the right starting point for the Browser/OS vision.
+
+---
+
+## 3. Strategic Reframing of the Attached Vision
+
+The attached plan is directionally strong, but in repo terms it should be reframed as:
+
+## 3.1 What “Aegis Browser” actually means in this codebase
+In this repository, the “Aegis Browser” should become:
+
+- the **primary UI/runtime shell** implemented in `apps/aegis-desktop`,
+- backed by:
+  - `aegis-vault` for local sovereign content,
+  - `aegis-identity` for authentication and node identity,
+  - `aegis-gateway` / adapted Sanctuary transport for private-node connections,
+  - `aegis-social` for space serving, visits, messaging, and federation.
+
+It should not initially try to replace a general-purpose browser. It should first become:
+
+- a **vault-native browser/runtime**
+- with controlled support for:
+  - `vault://`
+  - `node://`
+  - `sanctuary://`
+  - and optionally proxied `https://`
+
+## 3.2 What “Aegis OS” should mean at this stage
+Right now, “Aegis OS” should be treated as a **deployment target**, not a core code deliverable.
+
+The core deliverable is:
+- an **Aegis runtime stack** that can run on Linux/macOS/Windows.
+
+Once that runtime is stable, an immutable distro can package:
+- the runtime,
+- the browser shell,
+- the node services,
+- the vault mount,
+- the key management integration,
+- and the update pipeline.
+
+So the correct order is:
+
+1. **Aegis runtime**
+2. **Aegis Browser**
+3. **Aegis private/shared node product**
+4. **Aegis immutable appliance / distro**
+5. **Later: AegisOS-branded hardware image**
+
+## 3.3 What “Aegis Container” should mean in repo terms
+The attached document recommends WASM, and that is still the right direction. But based on the repo’s current state, WASM should be deferred until after:
+
+- private-node runtime exists,
+- vault serving exists,
+- browser sandbox exists,
+- messaging and sync primitives exist.
+
+WASM is best treated as:
+- a **Phase 4/5 capability execution substrate**
+- for user spaces, creator logic, automations, agent-like behaviors, and shared room logic.
+
+It should not delay the core private-node/browser milestone.
+
+---
+
+## 4. Architectural North Star
+
+The implementation goal should be:
+
+> Every user runs a local Aegis private node that owns their identity, vault, profile, room, inventory, and messaging state. The Aegis Browser is the trusted UI/runtime shell for rendering local and remote spaces under strict sandboxing. Shared nodes are optional overlays, not mandatory dependencies. A dedicated immutable AegisOS image is a packaging and hardening layer on top of this runtime, not a separate architecture.
+
+---
+
+## 5. Repo-Grounded Gap Analysis
+
+## 5.1 Layer 1 / Platform gaps
+Current state:
+- `aegis-platform` exists as abstraction layer.
+- Platform initialization exists.
+- FUSE/keyring/TPM integration are not yet visibly delivered as production features.
+
+Gaps:
+- real FUSE mount implementation
+- secure key storage integration
+- platform-specific privilege/runtime management
+- browser-safe local protocol integration
+- eventual TPM/Secure Enclave/Credential Manager binding
+
+## 5.2 Layer 4 Identity gaps
+Current state:
+- root identity and device issuance exist
+- DID docs exist
+- service endpoints exist
+- credentials/auth foundations exist
+
+Gaps:
+- identity persistence model standardization
+- login/session semantics for desktop runtime
+- peer trust UX
+- node discovery update semantics
+- revocation, rotation, recovery, and multi-device coordination
+- identity-as-node-auth-provider
+
+## 5.3 Layer 5 Vault gaps
+Current state:
+- encrypted file store exists
+- manifest exists
+- social bootstrap exists
+- sync snapshot exists
+- mount placeholder exists
+
+Gaps:
+- true virtual filesystem mount
+- richer metadata model
+- CRDT op log and network sync protocol
+- remote replication flows
+- partial sync / selective sync / attachment streaming
+- consistency/recovery tools
+
+## 5.4 Layer 6 App shell gaps
+Current state:
+- CLI exists
+- desktop/web are placeholders
+
+Gaps:
+- Tauri app scaffold
+- local protocol/router
+- sandbox policy
+- room renderer
+- editor
+- identity/vault management UI
+- peer visit UX
+- status/diagnostics
+- packaged desktop experience
+
+## 5.5 Layer 7 Social gaps
+Current state:
+- crate skeleton only
+
+Gaps:
+- private node runtime
+- serving local room content
+- visitor/client protocol
+- character/inventory exchange
+- messaging
+- shared-room state sync
+- federation
+- moderation and trust policies
+
+---
+
+## 6. Recommended Delivery Philosophy
+
+The biggest risk would be trying to build all of these simultaneously:
+- OS image,
+- browser,
+- shared rooms,
+- ActivityPub,
+- WASM,
+- full multi-device sync,
+- platform integrations.
+
+Instead, development should proceed in this strict order:
+
+1. **Make the private node real**
+2. **Make the browser shell real**
+3. **Make direct visits real**
+4. **Make sync and messaging real**
+5. **Make shared rooms real**
+6. **Make ecosystem packaging real**
+7. **Only then freeze into immutable distro/hardware product**
+
+---
+
+## 7. Phased Implementation Plan
+
+# Phase 0 — Repo Consolidation and Delivery Baseline
+**Goal:** align the repository with the actual architecture direction so implementation work can proceed without drift.
+
+## Objectives
+- Normalize roadmap across docs, crate comments, and app stubs.
+- Make the private-node-first model the single source of truth.
+- Create a clear internal milestone structure matching actual repo maturity.
+
+## Tasks
+
+### 0.1 Documentation alignment
+Update and unify:
+- root `README.md`
+- `aegis/README.md`
+- `aegis/docs/architecture.md`
+- `aegis-social-platform-spec-v2.md`
+
+Make them all explicitly distinguish:
+- **implemented**
+- **foundation implemented**
+- **placeholder**
+- **planned**
+
+### 0.2 Introduce milestone map in repo docs
+Add a top-level roadmap section like:
+- Phase 1 complete: crypto + transport + sanctuary
+- Phase 2A: identity/vault hardening
+- Phase 2B: private node runtime + browser
+- Phase 2C: sync + messaging + shared nodes
+- Phase 2D: federation + packaging + AegisOS image
+
+### 0.3 Define canonical “runtime topology”
+Create a single architecture section that identifies:
+- Aegis Desktop = Browser/runtime shell
+- Aegis CLI = ops/bootstrap/debug tool
+- Aegis Web = auxiliary/status/API surface, not primary sovereign runtime
+- Aegis Sanctuary = shared/private server primitive, not central platform dependency
+
+### 0.4 CI hardening for upcoming phases
+Current CI already includes fmt/clippy/check/test/audit. Expand planning for:
+- coverage
+- browser shell build checks
+- Linux/macOS desktop smoke tests
+- integration tests for identity/vault bootstrap
+- multi-process loopback node tests
+
+## Deliverables
+- unified architecture messaging
+- backlog categories aligned to implementation phases
+- reduced ambiguity for future contributors
+
+---
+
+# Phase 1 — Complete the Private Node Foundations
+**Goal:** turn current identity + vault foundations into a true local private-node substrate.
+
+This is the highest-priority implementation phase.
+
+## Why this phase first
+The Browser and OS concepts depend on:
+- a real local identity anchor,
+- a real local vault substrate,
+- a real local node state model.
+
+Without that, the desktop app is only a shell around placeholders.
+
+## 1.1 Identity hardening (`aegis-identity`)
+
+### Current repo basis
+- `RootIdentity::generate()`
+- `RootIdentity::issue_device()`
+- DID document generation
+- credential support
+- auth challenge/response
+
+### Required work
+
+#### 1.1.1 Define persistent identity directory contract
+Standardize on-disk layout for:
+- root DID doc
+- root signing material
+- root exchange material
+- device identity
+- device attestation
+- known peers / trust store
+- discovery endpoint records
+- rotation history
+- backup metadata
+
+#### 1.1.2 Formalize login identity lifecycle
+Promote identity from “CLI-generated material” into:
+- node owner identity
+- device login identity
+- session bootstrap authority
+
+This should enable the desktop app to:
+- load current identity,
+- verify device attestation,
+- unlock vault,
+- initialize network runtime.
+
+#### 1.1.3 Key rotation and recovery model
+Implement design and scaffolding for:
+- root key rotation
+- device re-issuance
+- lost-device revocation
+- backup/export flow
+- multi-device join flow
+
+Even if some are MVP-limited, the storage and API shape should be designed now.
+
+#### 1.1.4 Peer trust and trust store
+Add structures for:
+- known peer DIDs
+- trust state
+- blocklist / allowlist
+- pinned discovery endpoints
+- last-seen signed node records
+
+#### 1.1.5 Signed node advertisement model
+Use DID/service records as the basis for:
+- current node endpoint
+- protocol capabilities
+- version compatibility
+- room/public endpoint hints
+- shared-node participation metadata
+
+## 1.2 Vault hardening (`aegis-vault`)
+
+### Current repo basis
+- `VaultStore` with per-file AEAD
+- manifest
+- path-based key derivation
+- social bootstrap
+- minimal sync snapshot
+- placeholder FUSE mount
+
+### Required work
+
+#### 1.2.1 Formalize logical vault schema
+Expand the current social layout into a versioned schema covering:
+- `social/space/`
+- `social/character/`
+- `social/inventory/`
+- `social/profile/`
+- `social/feed/`
+- `social/messages/`
+- `social/peers/`
+- `social/shared_nodes/`
+- `apps/`
+- `runtime/`
+- `cache/`
+
+#### 1.2.2 Manifest evolution
+Current manifest is enough for minimal storage, but future runtime needs:
+- content hash
+- media type
+- schema classification
+- created_at / updated_at
+- tombstone flag
+- sync generation
+- author/device metadata
+- optional capability labels
+
+#### 1.2.3 Write/read API expansion
+Add higher-level vault APIs for:
+- JSON document read/write
+- asset streaming
+- directory listing
+- metadata listing
+- delete/tombstone semantics
+- batched updates / transactions
+
+#### 1.2.4 Integrity and repair tooling
+Implement utilities for:
+- manifest validation
+- orphan blob cleanup
+- missing blob detection
+- nonce/key mismatch handling
+- vault consistency repair
+
+#### 1.2.5 Vault unlocking model
+Define how vault master keys are handled:
+- file-based MVP
+- keyring-backed preferred path
+- optional passphrase wrap
+- future TPM/Secure Enclave wrapping
+
+## 1.3 Real FUSE / virtual filesystem implementation
+
+### Current repo basis
+- `mount.rs` is placeholder only.
+
+### Required work
+
+#### 1.3.1 Implement read-only mount first
+First production step should be **read-only** FUSE mount of logical vault paths.
+This is safer and enough to:
+- prove transparent decryption,
+- support browser/editor access,
+- validate path semantics,
+- support diagnostics.
+
+#### 1.3.2 Add write support second
+Once read-path is stable:
+- create/write/truncate/delete
+- manifest update coordination
+- atomic write staging
+- crash safety
+
+#### 1.3.3 Cross-platform strategy
+- Linux: primary target first
+- macOS: secondary
+- Windows: likely separate abstraction later
+
+Do not block Phase 1 on all platforms. Ship Linux first.
+
+#### 1.3.4 Browser/runtime integration goal
+The FUSE layer should make it possible for the browser/editor/runtime to treat selected vault content as normal files while preserving encrypted backing storage.
+
+## 1.4 Local node state model
+
+Introduce a new internal concept:
+- **Private Node State**
+
+This should represent:
+- identity
+- vault handle
+- local discovery record
+- current runtime config
+- peer trust store
+- active connections
+- feature flags
+
+This model can live initially in `aegis-social` or a new supporting crate/module, but it needs to exist before Browser logic is built.
+
+## Deliverables
+- production-ready identity/vault local substrate
+- true vault storage contract
+- read-only then read-write FUSE mount
+- clear local private node state object
+
+---
+
+# Phase 2 — Turn `aegis-desktop` into the Aegis Browser
+**Goal:** evolve the placeholder Tauri app into the primary Aegis user runtime.
+
+This is the repo’s direct implementation of the attached Browser vision.
+
+## 2.1 Desktop architecture target
+
+`aegis-desktop` should become:
+- local control plane,
+- room renderer,
+- vault browser,
+- identity manager,
+- peer visit client,
+- node dashboard,
+- eventually editor and app runtime.
+
+## 2.2 Initial Tauri shell implementation
+
+### Current repo basis
+- `apps/aegis-desktop/src/main.rs` is a placeholder print-only app.
+
+### Required work
+
+#### 2.2.1 Build real Tauri bootstrap
+Add:
+- Tauri app setup
+- command handlers
+- state management
+- platform init wiring
+- structured error surfaces
+
+#### 2.2.2 Core panels for MVP
+Implement first UI panels:
+- **Home / Node Status**
+- **Identity**
+- **Vault**
+- **Spaces**
+- **Visits**
+- **Settings / Diagnostics**
+
+#### 2.2.3 Backend service bridge
+Tauri backend should expose commands for:
+- load identity
+- show DID and device info
+- unlock/open vault
+- read profile/space files
+- list peers
+- connect to peer
+- inspect tunnel/session state
+
+## 2.3 Aegis Browser protocol model
+
+The attached plan proposes protocol handlers. That is correct and should be implemented in phases.
+
+### 2.3.1 `vault://`
+First and most important protocol.
+
+Use it for:
+- local room files
+- profile data
+- inventory assets
+- character assets
+- feed items
+- editor previews
+
+Requirements:
+- path canonicalization
+- access scoping
+- content type detection
+- read permission policy
+- no arbitrary vault escape
+
+### 2.3.2 `node://`
+Second protocol.
+
+Use it for:
+- direct visits to another user’s private node
+- direct asset/room retrieval over authenticated PQ transport
+
+Requirements:
+- DID-bound peer resolution
+- transport session establishment
+- remote content fetch API
+- local sandbox rendering
+
+### 2.3.3 `sanctuary://`
+Third protocol.
+
+Use it for:
+- shared/community/creator spaces
+- optional platform-hosted public rooms
+- event spaces
+
+### 2.3.4 Optional proxied `https://`
+Do **not** make this a core dependency for the MVP.
+Treat it as a later privacy utility:
+- route standard web traffic through Aegis networking stack/proxy where appropriate.
+
+## 2.4 Browser sandbox model
+
+This is one of the most critical security tasks in the whole plan.
+
+### Requirements
+Remote space content must be treated like hostile web content.
+
+The sandbox needs:
+- strict CSP
+- no ambient local FS access
+- no access to arbitrary Tauri commands
+- no unrestricted fetch
+- no arbitrary shell execution
+- controlled asset loading only from approved protocols
+- per-space origin/capability model
+
+### Recommended approach
+Define a capability model by origin class:
+
+- `vault://local-space/...`
+  - local edit/render permissions
+- `node://peer/...`
+  - remote content render only
+- `sanctuary://room/...`
+  - remote content render only
+- `app://ui/...`
+  - trusted UI shell only
+
+### Must-have MVP restrictions
+- remote pages cannot call privileged backend commands directly
+- remote JS cannot read arbitrary vault paths
+- remote content cannot trigger system actions
+- content must be loaded into isolated webviews or isolated contexts
+
+## 2.5 Room renderer
+Implement the first “space viewer” feature:
+- load `social/space/index.html`
+- resolve supporting assets
+- render local personal space
+- render remote fetched space in the same shell with a restricted execution model
+
+## 2.6 Space editor
+After viewer MVP:
+- file tree for `social/space/`
+- edit `index.html`, `style.css`, JSON metadata
+- asset import
+- preview mode
+- validation/linting for unsafe capabilities
+
+## Deliverables
+- real desktop app
+- real vault-native browser behavior
+- protocol handling
+- sandboxed room rendering
+- local space editor/viewer
+
+---
+
+# Phase 3 — Build the Private Node Runtime in `aegis-social`
+**Goal:** make Layer 7 real, starting with direct user-owned nodes.
+
+## 3.1 Current repo basis
+`aegis-social` currently has module declarations and error types only:
+- `messaging`
+- `groups`
+- `federation`
+
+This crate needs to expand from conceptual skeleton into the application runtime core.
+
+## 3.2 Add missing private-node runtime modules
+
+Recommended new internal modules:
+- `node`
+- `space_server`
+- `space_client`
+- `profile`
+- `character`
+- `inventory`
+- `peer`
+- `discovery`
+- `presence`
+- `visit_session`
+
+## 3.3 Implement local private node service
+
+The local node service should:
+- own identity handle
+- own vault handle
+- publish local capabilities
+- serve local room/profile/inventory state
+- manage incoming/outgoing visit sessions
+- mediate messaging and presence
+
+## 3.4 Direct visit protocol
+Implement first end-to-end visit flow:
+
+1. resolve peer from manual endpoint or DID record
+2. establish authenticated PQ transport
+3. request remote room manifest
+4. fetch room files/assets
+5. render in sandbox locally
+6. optionally send local avatar/equipped state
+7. maintain visit session with presence and chat
+
+This is the core proof-of-product milestone.
+
+## 3.5 Content serving model
+Remote private node should expose a restricted content API over the encrypted channel, not raw arbitrary filesystem access.
+
+Recommended abstraction:
+- room manifest endpoint
+- asset endpoint
+- profile endpoint
+- character summary endpoint
+- item proof endpoint
+- presence/chat endpoint
+
+## 3.6 Authorization model
+Add policies for:
+- public room access
+- allowlist-only access
+- invite token / signed approval
+- blocked peers
+- anonymous preview disallowed by default
+
+## 3.7 Loopback proof milestone
+The first complete Layer 7 proof should be:
+- two local Aegis instances on one machine,
+- each with its own identity and vault,
+- direct visit from A to B,
+- remote room rendered,
+- basic peer presence shown.
+
+This milestone should be considered the most important target after desktop bootstrap.
+
+## Deliverables
+- actual private node runtime
+- direct space serving
+- direct visits
+- first real social functionality in Aegis
+
+---
+
+# Phase 4 — Complete CRDT Sync and Multi-Device State
+**Goal:** evolve the current sync placeholder into a real multi-device and multi-node state engine.
+
+## 4.1 Current repo basis
+`aegis-vault/src/sync.rs` currently contains:
+- `SyncEntry`
+- `SyncSnapshot`
+- last-writer-wins merge logic
+- validation
+
+This is a good seed, but still only a data model helper.
+
+## 4.2 Required sync architecture
+
+### 4.2.1 Move from snapshot merge to operation-based sync
+Implement:
+- operation log
+- per-device actor IDs
+- monotonic sequence numbers / vector clocks where needed
+- tombstones
+- replay and compaction rules
+
+### 4.2.2 Data classes
+Different vault data types should not all share identical semantics.
+
+Recommended categories:
+- structured profile docs
+- room metadata
+- inventory ownership records
+- feed items
+- message logs
+- room presence state
+- binary asset blobs
+
+### 4.2.3 Conflict strategy by data type
+Use different semantics where appropriate:
+- profile/settings: LWW or field-level merge
+- directory membership: OR-Set
+- feed/messages: append-only/event log
+- room state: CRDT state doc
+- binary assets: content-addressed dedupe with manifest refs
+
+### 4.2.4 Network sync transport
+Sync should operate over existing authenticated encrypted channels where possible:
+- direct device-to-device
+- private node to owned secondary device
+- optional relay/shared infra later
+
+### 4.2.5 Offline-first model
+The system should tolerate:
+- edits while disconnected
+- delayed merge
+- deterministic conflict handling
+- resumable blob transfer
+
+## 4.3 Sync MVP scope
+The first sync milestone should cover:
+- profile
+- room metadata and room files
+- character state
+- inventory documents
+- feed posts
+
+Do not block on full message sync or group state sync for the first deliverable.
+
+## 4.4 Test plan
+Add integration tests for:
+- concurrent edits on two devices
+- delete/update conflict
+- blob present on one side only
+- interrupted sync recovery
+- deterministic merge replay
+
+## Deliverables
+- real sync engine
+- multi-device private node continuity
+- basis for shared nodes and offline use
+
+---
+
+# Phase 5 — Messaging and Shared Nodes
+**Goal:** make Aegis socially useful beyond static visits.
+
+## 5.1 Direct messaging
+The social spec already identifies PQ Double Ratchet as the intended model.
+
+### Implementation plan
+- add direct conversation state model
+- per-peer session establishment
+- message envelopes
+- local vault storage of conversation logs
+- delivery receipts / basic status
+- reconnect and session re-establishment logic
+
+### MVP constraints
+- online direct delivery first
+- store-and-forward later
+- file attachments later
+
+## 5.2 Presence and in-room chat
+Before full DM maturity, implement:
+- visit session presence
+- ephemeral chat within a direct visit
+- typing / minimal state
+- optional transcript save to vault
+
+## 5.3 Shared nodes
+Shared nodes are Phase 5 because they rely on:
+- direct node runtime
+- browser shell
+- sync model
+- presence model
+
+### Shared-node runtime should provide
+- room state document
+- participant presence
+- HTML/assets for shared environment
+- policy and moderation hooks
+- optional creator/community branding
+
+### Recommended implementation path
+1. single-room shared node MVP
+2. CRDT room-state sync
+3. group chat
+4. moderation/admin controls
+5. multi-room shared nodes
+
+## 5.4 MLS/group crypto
+The current social crate mentions MLS-inspired groups.
+That should be phased carefully:
+- begin with room-presence and basic group message abstraction
+- then add robust group key lifecycle
+- keep protocol boundaries clear so MLS-compatible internals can evolve
+
+## Deliverables
+- direct messaging MVP
+- shared room MVP
+- first creator/community node experience
+
+---
+
+# Phase 6 — Browser-to-Runtime Expansion and WASM Containers
+**Goal:** introduce programmable, sandboxed execution within the Aegis environment.
+
+## 6.1 Why this phase comes later
+WASM is strategically correct, but not first. A container runtime only becomes valuable once:
+- spaces exist,
+- peer visits exist,
+- shared nodes exist,
+- creators need programmable logic.
+
+## 6.2 WASM execution model
+Embed a WASM runtime in Rust, likely in a dedicated crate or within `aegis-social`/runtime layer.
+
+Potential uses:
+- room scripts with bounded capabilities
+- creator plugins
+- automation tasks
+- content transforms
+- item logic
+- local assistant-like workflows
+- sandboxed compute exchanges
+
+## 6.3 Capability system
+WASM modules must use explicit capabilities:
+- read scoped vault paths
+- write scoped vault paths
+- network to approved peer/session scope only
+- limited storage quota
+- CPU/runtime budget
+- no unrestricted host access
+
+## 6.4 Distribution model
+WASM packages should be:
+- signed
+- versioned
+- capability-declared
+- optionally DID/creator-attested
+
+## 6.5 Relation to Browser
+The Browser should be able to:
+- install a package
+- inspect requested capabilities
+- enable/disable it
+- execute it within a room or local runtime context
+
+## Deliverables
+- embedded sandboxed execution
+- creator/plugin substrate
+- future foundation for “Aegis app ecosystem”
+
+---
+
+# Phase 7 — ActivityPub Federation and Ecosystem Interop
+**Goal:** connect Aegis to the broader federated social graph without undermining sovereignty.
+
+## 7.1 Federation scope
+The current spec targets:
+- ActivityPub actor mapping
+- signed posts
+- delivery to/from Fediverse-compatible systems
+
+## 7.2 Recommended phased approach
+1. outbound public profile + actor representation
+2. signed `Note` publishing from vault-backed feed
+3. inbound follow/accept handling
+4. feed ingest to local vault
+5. richer object support later
+
+## 7.3 Identity mapping decisions
+Need a stable mapping between:
+- `did:aegis`
+- local node identity
+- ActivityPub actor URL / handle representation
+
+This should be designed carefully before implementation to avoid later incompatible migration.
+
+## 7.4 Security constraints
+Federation should remain:
+- additive,
+- optional,
+- separated from private visit and DM paths,
+- and clearly marked as a public-facing exposure boundary.
+
+## Deliverables
+- Aegis-to-Fediverse interop
+- public social discoverability without abandoning private-node model
+
+---
+
+# Phase 8 — Aegis Web Utility Surface
+**Goal:** make `aegis-web` a useful auxiliary service rather than leaving it placeholder-only.
+
+## 8.1 Current repo basis
+`aegis-web` is currently a placeholder printing planned endpoints.
+
+## 8.2 Recommended role
+Do **not** make `aegis-web` the primary user environment.
+Instead, use it for:
+- health/status APIs
+- diagnostics
+- optional local dashboard
+- future `check.aegis.dev` verification service
+- optional admin surface for shared nodes
+
+## 8.3 Suggested implementation order
+- `/health`
+- `/api/v1/status`
+- `/api/v1/identity`
+- `/api/v1/vault/summary`
+- `/check`
+- shared-node admin/status endpoints later
+
+## Deliverables
+- useful API/status surface
+- testability and observability improvements
+- basis for managed tooling later
+
+---
+
+# Phase 9 — Immutable Linux Distribution / AegisOS
+**Goal:** package the now-mature Aegis runtime as a dedicated appliance-like environment.
+
+This is where the attached OS vision should land.
+
+## 9.1 Correct interpretation
+AegisOS should be:
+- a hardened packaging/deployment profile for the runtime,
+- not a separately engineered kernel/platform.
+
+## 9.2 Recommended distro strategy
+The attached note suggests Alpine or NixOS / Fedora CoreOS-like direction.
+
+Repo-grounded recommendation:
+- prototype with a **minimal immutable Linux base**
+- prioritize:
+  - secure boot compatibility
+  - read-only root
+  - signed updates
+  - easy system service management
+  - strong reproducibility
+
+NixOS or Fedora CoreOS/Silverblue-style thinking is architecturally more aligned with long-term immutable operations than an ad hoc custom distro.
+
+## 9.3 AegisOS package contents
+The image should ultimately include:
+- Aegis runtime services
+- Aegis Browser
+- vault mount service
+- node discovery/update agent
+- key storage integration
+- update service
+- diagnostics and recovery tooling
+
+## 9.4 System behavior target
+Boot flow should become:
+1. verified boot
+2. unlock identity/device context
+3. unlock vault
+4. start local node services
+5. launch Aegis Browser as primary shell
+6. optionally expose shared-node or admin services
+
+## 9.5 Hardware integration later
+Only after distro maturity:
+- TPM sealing
+- Secure Enclave / hardware-backed keys where relevant
+- dedicated appliance/hardware SKU
+- kiosk-like/browser-shell mode
+
+## Deliverables
+- immutable Aegis appliance image
+- dedicated private-node device experience
+- bridge from app platform to sovereign endpoint product
+
+---
+
+## 8. Suggested Repo-Level Work Breakdown by Crate/App
+
+## 8.1 `crates/aegis-vault`
+### Near-term
+- implement real mount layer
+- expand manifest metadata
+- add JSON/document helpers
+- add delete/tombstone ops
+- add repair/validation tools
+
+### Mid-term
+- full sync op log
+- actor/device IDs
+- network sync protocol
+- blob sync and compaction
+
+## 8.2 `crates/aegis-identity`
+### Near-term
+- persistent identity schema
+- trust store
+- rotation/recovery scaffolding
+- signed node advertisements
+
+### Mid-term
+- multi-device management
+- richer auth/session model
+- discovery integration APIs
+
+## 8.3 `crates/aegis-social`
+### Near-term
+- private node service
+- space server/client
+- visit sessions
+- peer models
+- profile/character/inventory exchange
+
+### Mid-term
+- DMs
+- shared nodes
+- group crypto
+- federation
+
+## 8.4 `apps/aegis-desktop`
+### Near-term
+- real Tauri app shell
+- vault browser
+- identity panel
+- local space renderer
+- protocol handler support
+
+### Mid-term
+- remote visit UX
+- editor
+- inventory manager
+- diagnostics and trust UX
+
+## 8.5 `apps/aegis-web`
+### Near-term
+- health/status endpoints
+- check endpoint
+- local admin/status APIs
+
+### Mid-term
+- shared-node admin surfaces
+- optional public verification utilities
+
+## 8.6 `apps/aegis-cli`
+### Near-term
+- expand bootstrap/diagnostic commands
+- add vault inspect/repair
+- add identity rotate/export/import
+- add node test/loopback utilities
+
+### Mid-term
+- peer registration helpers
+- sync debug commands
+- shared-node ops helpers
+
+---
+
+## 9. Concrete MVP Sequence Recommendation
+
+If the goal is fastest path from current repo to something impressive and real, the next milestones should be:
+
+### MVP-1: Private Node Bootstrap Polish
+- stabilize identity storage
+- stabilize vault storage
+- improve CLI bootstrap and diagnostics
+
+### MVP-2: Local Browser Proof
+- real Tauri app
+- load/render local `vault://social/space/index.html`
+- inspect profile/inventory data
+
+### MVP-3: Direct Visit Proof
+- two local nodes
+- one node visits the other
+- remote room manifest/assets fetched and rendered
+- peer DID shown and verified
+
+### MVP-4: Basic In-Room Messaging
+- visit session chat
+- local transcript storage
+
+### MVP-5: Shared Room Prototype
+- one shared node
+- multiple local clients
+- room presence state
+
+### MVP-6: Multi-Device Sync
+- same user on two devices/instances
+- consistent room/profile/inventory replication
+
+### MVP-7: Hardened Browser + Optional AegisOS Image
+- immutable runtime packaging
+- appliance-style node/browser experience
+
+---
+
+## 10. Key Design Rules to Preserve During Implementation
+
+## 10.1 Do not let shared infrastructure become mandatory
+Everything should keep reinforcing:
+- private node first,
+- shared nodes optional,
+- bootstrap infra off data path.
+
+## 10.2 Do not let the browser become a privilege escalation surface
+Remote user HTML/JS must be treated as hostile by default.
+
+## 10.3 Do not couple the vault API too tightly to one UI
+The CLI, desktop app, future mobile app, and shared node runtime should all be able to use the same vault substrate.
+
+## 10.4 Do not overbuild the OS before the runtime exists
+The runtime is the product; the OS is a packaging/hardening strategy.
+
+## 10.5 Keep cryptographic boundaries explicit
+Transport, identity, storage, messaging, and federation should remain separable layers.
+
+---
+
+## 11. Risks and Mitigations
+
+## 11.1 Risk: building too many surfaces at once
+**Mitigation:** enforce milestone gating around private node → browser → visits.
+
+## 11.2 Risk: insecure browser integration
+**Mitigation:** capability-based protocol model, isolated contexts, strict CSP, no raw backend exposure.
+
+## 11.3 Risk: sync complexity explosion
+**Mitigation:** phase sync by data class; start with snapshots evolving to op logs.
+
+## 11.4 Risk: identity model drift
+**Mitigation:** define stable on-disk identity contract before desktop and federation work.
+
+## 11.5 Risk: Sanctuary role confusion
+**Mitigation:** consistently present Sanctuary as:
+- reusable server primitive,
+- shared-node substrate,
+- optional infra,
+- not central architecture.
+
+---
+
+## 12. Recommended Immediate Next Sprint
+
+The best immediate sprint, based on actual repo state, is:
+
+### Sprint A — “Make the private node tangible”
+1. finish identity directory contract
+2. expand vault schema helpers
+3. add vault inspection/listing APIs
+4. define node state object
+5. create desktop Tauri scaffold
+6. render local `social/space/index.html`
+7. show current DID/profile in desktop UI
+
+That sprint would convert the project from:
+- transport+crypto foundation
+into
+- a visible sovereign runtime prototype.
+
+After that:
+
+### Sprint B — “Direct visit loopback  
+1. add local node runtime service
+2. implement room manifest serving
+3. implement remote room fetch
+4. render remote room in desktop shell
+5. add DID verification display
+6. add two-node loopback test
+
+That would be the first truly product-defining milestone.
+
+---
+
+## 13. Final Recommendation
+
+The attached Aegis OS / Browser / Container vision is correct, but the implementation sequence should be:
+
+1. **Complete identity + vault into a real private-node substrate**
+2. **Turn `aegis-desktop` into the Aegis Browser**
+3. **Implement direct private-node visits in `aegis-social`**
+4. **Finish real sync and messaging**
+5. **Add shared nodes**
+6. **Add WASM container/runtime**
+7. **Package the whole thing as immutable AegisOS**
+
+In other words:
+
+- **Do not build the OS first**
+- **Do not build WASM first**
+- **Do build the Browser and private node first**
+- **Do use the existing transport/identity/vault foundations as the launchpad**
+
+This matches both:
+- the attached strategic vision,
+- and the actual current state of the repository.
+
+---
