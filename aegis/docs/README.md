@@ -102,7 +102,10 @@ cargo run -p aegis-sanctuary -- --config sanctuary.toml
 cargo fmt --all --check
 
 # Lint
-cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
+
+# Typecheck/build validation
+cargo check --workspace --all-targets
 
 # Run fuzz tests (requires nightly)
 cd crates/aegis-crypto
