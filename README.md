@@ -14,6 +14,29 @@ control over their data, identity, and communications.
 - 🔑 **CLI:** `aegis up/down/status/keygen` commands
 - 🧪 **90+ tests**, 3 fuzz targets, CI pipeline with fmt/clippy/test/audit
 
+## Current Repo Maturity
+
+- ✅ **Implemented now:** `aegis-crypto`, `aegis-gateway`, and `aegis-sanctuary`
+- 🟡 **Foundation implemented:** `aegis-identity` and `aegis-vault`
+- 🟧 **Placeholder:** `aegis-desktop` and `aegis-web`
+- 🔲 **Planned:** the full `aegis-social` private-node runtime, real sync/messaging, and any immutable AegisOS image
+
+## Canonical Runtime Topology
+
+- **Aegis Desktop** (`apps/aegis-desktop`) is the intended future **Aegis Browser / runtime shell**
+- **Aegis CLI** (`apps/aegis-cli`) is the bootstrap, ops, and diagnostics tool
+- **Aegis Web** (`apps/aegis-web`) is a planned auxiliary status/API surface, not the primary sovereign runtime
+- **Aegis Sanctuary** is an optional transport/server primitive for private or shared nodes, not a mandatory central platform hop
+- **AegisOS** is a later packaging and hardening target that follows a stable runtime, not the first product milestone
+
+## Repo-Grounded Roadmap
+
+- **Phase 1 complete:** crypto + transport + Sanctuary
+- **Phase 2A:** identity/vault hardening into a real private-node substrate
+- **Phase 2B:** private-node runtime + Aegis Browser shell
+- **Phase 2C:** sync + messaging + shared nodes
+- **Phase 2D:** federation + ecosystem packaging + optional AegisOS image
+
 ## Quick Start
 
 ```bash
@@ -36,6 +59,7 @@ Aegis is moving toward a **private-node-by-default** model for its social layer:
 - Direct private-node-to-private-node connections are the default social path.
 - Shared Sanctuary/community nodes are **opt-in**, not required for the core product.
 - The currently implemented gateway/Sanctuary transport is a foundation for that direction, not proof that the private-node social runtime already exists.
+- The runtime and browser come before any dedicated AegisOS distribution; the OS is a later packaging layer on top of the runtime.
 
 ## Architecture
 
@@ -53,6 +77,7 @@ Layer 1: Platform Abstract  — TUN, keyring, entropy, FUSE traits     ✅
 
 See [`aegis/docs/`](aegis/docs/) for full documentation:
 
+- [Aegis OS / Browser Plan](Aegis_OS_Browser_Plan.md) — repo-grounded roadmap and current source of truth for sequencing
 - [Architecture Specification](aegis/docs/architecture.md) — 15-section system design
 - [Cryptography](aegis/docs/cryptography.md) — Algorithm suite, hybrid KEM, transport key derivation
 - [Threat Model](aegis/docs/threat-model.md) — Adversary capabilities and mitigations

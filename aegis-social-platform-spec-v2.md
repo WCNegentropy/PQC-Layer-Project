@@ -2,9 +2,9 @@
 ## Project Aegis · WCNegentropy Holdings LLC
 
 > **Document Type:** Product & Architecture Specification
-> **Version:** 2.1
-> **Date:** 2026-04-18
-> **Status:** Active — supersedes v1 (pre-pivot, Secria partnership draft)
+> **Version:** 2.2
+> **Date:** 2026-04-21
+> **Status:** Active — aligned to `Aegis_OS_Browser_Plan.md` as the repo-grounded sequencing source of truth
 > **Repo:** [WCNegentropy/PQC-Layer-Project](https://github.com/WCNegentropy/PQC-Layer-Project)
 
 ---
@@ -14,6 +14,13 @@
 The Aegis Social Platform is a decentralized, post-quantum-cryptographically secured social environment built natively on the Aegis infrastructure stack. It is best understood as a spiritual successor to the creative era of MySpace and the playful world-building of Club Penguin — rebuilt from first principles with 2026-era cryptography, true data ownership, and a free-by-default economic model that is structurally impossible for centralized competitors to replicate.
 
 Every user gets their own **private node** and **Personal Space**: a fully customizable, HTML/CSS/JS-rendered digital environment stored entirely in their local Aegis encrypted vault and served from infrastructure they control. Characters, outfits, items, room layouts, and profile data are all local-first JSON and asset files — the platform hosts nothing on their behalf by default. Social interaction happens directly private-node-to-private-node over PQC-secured Aegis tunnels, or via **opt-in** shared Sanctuary nodes for group spaces and events. Because content lives on user devices, the core platform is **free by default** — not as a promotional offer, but as a structural consequence of the architecture.
+
+In current repo terms, that vision is **not** greenfield. The implemented base is the crypto layer, gateway transport, Sanctuary server primitive, and identity/vault foundations. The desktop app, web app, and full social runtime are still mostly placeholders or planned work, so the delivery sequence is:
+
+1. harden identity + vault into a real private-node substrate,
+2. turn `aegis-desktop` into the **Aegis Browser / runtime shell**,
+3. add direct visits, sync, messaging, and optional shared nodes,
+4. only later package the mature runtime as AegisOS.
 
 ## Network Topology Thesis
 
@@ -299,6 +306,17 @@ The guiding principle: **if it is core to user sovereignty, it is free and user-
 
 ## Implementation Roadmap
 
+### Phase 1 Complete
+- ✅ `aegis-crypto`, `aegis-gateway`, and `aegis-sanctuary` are implemented and usable foundations
+- ✅ CLI bootstrap flows exist for identity creation and vault initialization
+- ✅ The repo already proves the seed of a private-node bootstrap path: create identity → create vault → populate social layout
+
+### Canonical Runtime Roles
+- **`aegis-desktop`** = future Aegis Browser / runtime shell
+- **`aegis-cli`** = bootstrap, ops, and diagnostics tool
+- **`aegis-web`** = auxiliary status/API/web surface, not the primary sovereign runtime
+- **`aegis-sanctuary`** = optional private/shared-node transport primitive, not a mandatory central platform hop
+
 ### Phase 2A — Identity Foundation (prerequisite)
 - ✅ Implemented foundational `aegis-identity` support: local `did:aegis` generation, root→device identity issuance, ML-DSA-65 VC issuance/verification, and signed auth challenges
 - ✅ Implemented foundational `aegis-vault` support: per-file AEAD encryption and bootstrap creation of the social vault directory structure
@@ -314,7 +332,12 @@ The guiding principle: **if it is core to user sovereignty, it is free and user-
   - Character sync: transmit equipped avatar JSON to visiting peers
   - Item VC verification: validate inventory proofs on receipt
   - Local two-node loopback testing on one machine as the first full-system proof
-- Tauri desktop app (`aegis-desktop`): space viewer/editor, character panel, inventory manager
+- Turn the placeholder Tauri desktop app (`aegis-desktop`) into the Aegis Browser / runtime shell:
+  - space viewer/editor
+  - character panel
+  - inventory manager
+  - identity/vault management UI
+  - local protocol handling for `vault://`, `node://`, and `sanctuary://`
 
 ### Phase 2C — Shared Nodes & Messaging
 - Manual peer exchange for MVP discovery
@@ -328,7 +351,9 @@ The guiding principle: **if it is core to user sovereignty, it is free and user-
 - ActivityPub actor implementation tied to DID
 - ML-DSA-65 signed AP object publishing
 - Creator tools: item bundle format, room theme packaging, marketplace protocol
+- Auxiliary `aegis-web` service/API surface
 - Mobile app (`aegis-mobile`): iOS and Android space viewer
+- Optional immutable AegisOS packaging after the runtime stack is mature
 
 ---
 
@@ -341,7 +366,8 @@ The guiding principle: **if it is core to user sovereignty, it is free and user-
 | Hybrid KEM, AEAD, ML-DSA-65 | Layer 2 | `aegis-crypto` | ✅ Implemented |
 | DID identity + node discovery + VC item proofs | Layer 4 | `aegis-identity` | 🟡 Foundation implemented |
 | Vault storage for all social data | Layer 5 | `aegis-vault` | 🟡 Foundation implemented |
-| Desktop/mobile app shell | Layer 6 | `aegis-desktop` | 🔲 Planned |
+| Aegis Browser / runtime shell | Layer 6 | `aegis-desktop` | 🟧 Placeholder |
+| Auxiliary service/API/web surface | Layer 6 | `aegis-web` | 🟧 Placeholder |
 | Private node runtime, shared nodes, AP feed | Layer 7 | `aegis-social` | 🔲 Planned |
 
 ---
@@ -367,4 +393,4 @@ The guiding principle: **if it is core to user sovereignty, it is free and user-
 
 ## Summary
 
-The Aegis Social Platform is not a feature added to a privacy tool. It is the natural consumer product expression of the Aegis infrastructure — a world where your digital social life is as private, durable, and truly yours as the keys in your own pocket. The MySpace-era creativity, the Club Penguin-era playfulness, the post-quantum cryptographic guarantees of Aegis, and a private-node-first model that no centralized competitor can structurally replicate all converge here. The transport layer exists today; the private-node social runtime described above is the intended next architecture, not a claim of present implementation.
+The Aegis Social Platform is the consumer-facing expression of the Aegis infrastructure, but the repo-grounded sequence matters: the transport layer exists today, identity/vault foundations exist today, and the private-node social runtime plus Aegis Browser remain the intended next architecture. The immediate product goal is a real private-node substrate and trusted browser/runtime shell; AegisOS is a later packaging and hardening outcome, not the first deliverable.

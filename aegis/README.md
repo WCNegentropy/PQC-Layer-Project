@@ -11,6 +11,20 @@ The intended long-term topology is **private-node first**:
 - shared Sanctuary nodes are optional community/platform spaces rather than mandatory hops,
 - the current implemented gateway and Sanctuary crates are transport primitives that future private/shared node runtimes will build on.
 
+The repo-grounded delivery sequence is:
+
+1. complete the private-node substrate in identity + vault,
+2. turn `apps/aegis-desktop` into the **Aegis Browser / runtime shell**,
+3. add direct visits, sync, messaging, and optional shared nodes,
+4. package the mature runtime later as an immutable **AegisOS** target.
+
+## Current Repo Maturity
+
+- ✅ **Implemented:** `aegis-crypto`, `aegis-gateway`, `aegis-sanctuary`
+- 🟡 **Foundation implemented:** `aegis-identity`, `aegis-vault`
+- 🟧 **Placeholder:** `aegis-desktop`, `aegis-web`
+- 🔲 **Planned:** `aegis-social`, full sync/messaging/shared-node runtime, AegisOS packaging
+
 ## Project Structure
 
 ```
@@ -25,9 +39,9 @@ aegis/
 │   ├── aegis-social/       # Planned private-node social runtime and optional shared rooms
 │   └── aegis-sanctuary/    # Current PQ-WG server primitive for self-hosted private/shared nodes
 ├── apps/                   # Application binaries
-│   ├── aegis-desktop/      # Desktop client application
-│   ├── aegis-cli/          # Command-line interface
-│   └── aegis-web/          # Web-based interface
+│   ├── aegis-desktop/      # Future Aegis Browser / runtime shell (placeholder today)
+│   ├── aegis-cli/          # Bootstrap, ops, and diagnostics interface
+│   └── aegis-web/          # Planned auxiliary status/API/web surface (placeholder today)
 ├── tests/                  # Test suites
 │   ├── integration/        # Integration tests
 │   ├── fuzz/               # Fuzz testing
@@ -106,6 +120,14 @@ docker build -t aegis-sanctuary -f Dockerfile.sanctuary .
 docker compose -f docker-compose.sanctuary.yml up -d
 ```
 
+## Milestone Map
+
+- **Phase 1 complete:** crypto + gateway transport + Sanctuary server
+- **Phase 2A:** identity/vault hardening for a real local private node
+- **Phase 2B:** private-node runtime + Aegis Browser shell
+- **Phase 2C:** sync + messaging + optional shared nodes
+- **Phase 2D:** federation + ecosystem packaging + optional AegisOS image
+
 ## Core Crates
 
 ### aegis-crypto
@@ -147,6 +169,12 @@ key derivation, and bootstrap creation of the private-node social vault layout.
 
 Planned social layer for private-node spaces, direct visits, optional shared
 nodes, messaging, and federation.
+
+### Application Roles
+
+- **`aegis-desktop`** should become the main sovereign user runtime and Aegis Browser.
+- **`aegis-cli`** remains the bootstrap, automation, and debugging tool.
+- **`aegis-web`** should become an auxiliary service/API surface rather than the primary user runtime.
 
 ## Development
 
