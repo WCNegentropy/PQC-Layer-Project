@@ -30,6 +30,7 @@ const KEYS_DIR: &str = ".aegis/keys";
 const MANIFEST_FILE: &str = ".aegis/manifest.json";
 const UNLOCK_METADATA_FILE: &str = ".aegis/unlock.json";
 const FILE_KEY_INFO: &[u8] = b"aegis-vault-file-key-v1";
+const LEGACY_TIMESTAMP: u64 = 0;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct VaultManifest {
@@ -882,7 +883,8 @@ fn content_hash(bytes: &[u8]) -> String {
 }
 
 fn is_initialized_timestamp(value: u64) -> bool {
-    value != 0
+    // `0` is reserved for legacy/migrated entries where creation time was not recorded.
+    value != LEGACY_TIMESTAMP
 }
 
 fn infer_media_type(logical_path: &str) -> Option<String> {

@@ -387,19 +387,20 @@ impl IdentityDirectory {
         let device_credential: Credential =
             read_json(&self.root.join(LEGACY_DEVICE_CREDENTIAL_FILE))?;
         let device_slug = slugify_device_name(&device_name);
+        let legacy_created_at = device_credential.issued_at;
         Ok(StoredIdentity {
             metadata: IdentityDirectoryMetadata {
                 contract_version: LEGACY_CONTRACT_VERSION,
                 owner_did: owner_did.clone(),
                 active_device_slug: device_slug.clone(),
-                created_at: 0,
+                created_at: legacy_created_at,
             },
             active_device: DeviceMetadata {
                 slug: device_slug,
                 name: device_name,
                 owner_did,
                 device_did: device_credential.subject.to_string(),
-                created_at: device_credential.issued_at,
+                created_at: legacy_created_at,
             },
             did_document,
             device_credential,

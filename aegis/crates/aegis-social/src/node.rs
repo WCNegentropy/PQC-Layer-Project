@@ -226,9 +226,12 @@ impl PrivateNodeState {
                 "owner DID cannot be empty".into(),
             ));
         }
+        // The runtime bootstrap persists absolute identity/vault roots so later
+        // protocol handlers and desktop integrations do not depend on cwd state.
         if !self.identity_dir.is_absolute() || !self.vault_dir.is_absolute() {
             return Err(SocialError::InvalidNodeState(
-                "identity and vault paths must be absolute".into(),
+                "identity and vault paths must be absolute for deterministic runtime bootstrap"
+                    .into(),
             ));
         }
         if self
