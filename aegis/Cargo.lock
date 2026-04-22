@@ -134,6 +134,7 @@ name = "aegis-vault"
 version = "0.1.0"
 dependencies = [
  "aegis-crypto",
+ "aegis-platform",
  "hkdf",
  "rand",
  "serde",
