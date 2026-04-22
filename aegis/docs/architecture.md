@@ -1,7 +1,7 @@
-# Project Aegis — Architecture Specification v0.4
+# Project Aegis — Architecture Specification v0.5
 
-> **Status:** Phase 1 transport complete — gateway ↔ sanctuary works end-to-end; private-node-first social topology is the intended next architecture
-> **Last Updated:** 2026-04-18
+> **Status:** Phase 1 complete — crypto + gateway + Sanctuary are implemented; identity/vault are the next substrate to harden before the Browser/runtime phase
+> **Last Updated:** 2026-04-21
 > **Authors:** WCNegentropy, Copilot
 
 ---
@@ -31,6 +31,13 @@ Aegis is now explicitly targeting a **private-node-by-default** social topology:
 
 The currently implemented `aegis-gateway` and `aegis-sanctuary` crates remain transport-layer building blocks. The private-node runtime, discovery system, and social application layer described here are largely **planned**, not yet implemented.
 
+The canonical product sequence is:
+
+1. complete the private-node substrate in `aegis-identity` + `aegis-vault`,
+2. turn `apps/aegis-desktop` into the **Aegis Browser / runtime shell**,
+3. add direct visits, sync, messaging, and optional shared nodes,
+4. package the stable runtime later as an immutable **AegisOS** target.
+
 ---
 
 ## 2. System Architecture
@@ -41,7 +48,7 @@ The currently implemented `aegis-gateway` and `aegis-sanctuary` crates remain tr
 │   Private nodes by default, opt-in shared nodes, federation     │
 ├─────────────────────────────────────────────────────────────────┤
 │                    LAYER 6: APPLICATION SHELL                   │
-│      Desktop/Mobile UI (Tauri), CLI, editors, local runtime     │
+│   Browser/runtime shell, CLI, editors, local protocol surface   │
 ├─────────────────────────────────────────────────────────────────┤
 │                    LAYER 5: DATA SOVEREIGNTY VAULT              │
 │         Encrypted FS (FUSE), Object Store, CRDT Sync Engine     │
@@ -100,8 +107,8 @@ aegis/
 │   └── aegis-social/               # Layer 7: Private/shared node social runtime (planned)
 ├── apps/
 │   ├── aegis-cli/                  # CLI: up/down/status/keygen ✅ FUNCTIONAL
-│   ├── aegis-desktop/              # Tauri desktop app (placeholder)
-│   └── aegis-web/                  # Web frontend (placeholder)
+│   ├── aegis-desktop/              # Future Aegis Browser / runtime shell (placeholder)
+│   └── aegis-web/                  # Auxiliary API/status/web surface (placeholder)
 ├── tests/
 │   ├── integration/
 │   ├── fuzz/                       # 3 fuzz targets: fuzz_kem_deser, fuzz_aead, fuzz_sign
@@ -265,52 +272,55 @@ let pk = HybridPublicKey::from_bytes(&pk_bytes)?;
 
 ## 6. Implementation Roadmap
 
-### Phase 0: Foundation ✅ COMPLETE
-- [x] Cargo workspace with CI
-- [x] `aegis-crypto`: Hybrid KEM with transcript binding
-- [x] Fuzz targets, unit tests, zeroization
+### Phase 1 Complete ✅
+- [x] `aegis-crypto`: hybrid KEM, AEAD, ML-DSA foundations
+- [x] `aegis-gateway`: packet pipeline, handshake, transport encryption, anti-replay, rekey triggers
+- [x] `aegis-sanctuary`: responder/server primitive, Docker deployment, configuration, tests
+- [x] `aegis-cli`: `up/down/status/keygen` plus identity/vault bootstrap flows
 
-### Phase 1: Sentinel MVP ✅ COMPLETE
-- [x] Async packet pipeline with safe parsing
-- [x] Pipeline statistics and graceful shutdown
-- [x] CLI: `aegis up`, `aegis down`, `aegis status`, `aegis keygen`
-- [x] PQ-WireGuard handshake implementation (dual hybrid KEM)
-- [x] Tunnel engine (encrypt/decrypt transport packets)
-- [x] Anti-replay protection (RFC 6479 sliding window)
-- [x] Session management with rekeying (120s / 65,536 packets)
-- [x] Keypair persistence (load/save)
-- [x] Sanctuary Node v0 (UDP server, responder handshake, session management)
-- [x] Sanctuary NAT proxy (IP forwarding, client mapping)
-- [x] Sanctuary Docker deployment (Dockerfile + Compose)
-- [x] Sanctuary TOML configuration + authorized peers
-- [ ] DNS Membrane (local resolver, DoH over tunnel)
-- [ ] `check.aegis.dev` verification endpoint
+### Phase 2A: Identity/Vault Hardening
+- [x] Key hierarchy foundations (root → device → session/storage)
+- [x] `did:aegis` generation and DID document/service record output
+- [x] ML-DSA-65 verifiable credentials and auth challenge/response foundations
+- [x] Encrypted vault storage and private-node social bootstrap layout
+- [ ] Production FUSE filesystem mount
+- [ ] Real CRDT-based multi-device/network sync
+- [ ] Recovery, rotation, and multi-device coordination flows
+- [ ] Loopback proof of two local private nodes connecting directly
 
-### Phase 2: Identity, Vault, and Private Node Foundations
-- [x] Key hierarchy (root → device → session) foundations
-- [x] DID (`did:aegis`) implementation
-- [x] DID service/discovery records for private node reachability
-- [x] Verifiable Credentials with ML-DSA-65
-- [x] Encrypted vault storage (per-file AEAD)
-- [ ] FUSE filesystem mount
-- [ ] CRDT-based multi-device sync
-- [x] Local private-node profile/vault layout for social content
-- [ ] Loopback test: two local Aegis instances connecting directly
-
-### Phase 3: Social Fabric
+### Phase 2B: Private Node Runtime + Aegis Browser
 - [ ] Private node runtime enabled by default for each user
 - [ ] Direct private-node visits and vault-backed space serving
-- [ ] Manual peer exchange for MVP discovery
+- [ ] `aegis-desktop` becomes the Aegis Browser / runtime shell
+- [ ] Local protocol/router for `vault://`, `node://`, and `sanctuary://`
+- [ ] Identity/vault management UI, diagnostics, and editor flows
+
+### Phase 2C: Sync, Messaging, and Shared Nodes
 - [ ] PQ Double Ratchet messaging
 - [ ] Optional shared nodes with MLS-inspired group encryption
-- [ ] Bootstrap discovery nodes outside the data path
+- [ ] Bootstrap discovery outside the normal data path
 - [ ] DID-based node discovery / resolution
+- [ ] Shared-room operator tooling and multi-process integration tests
+
+### Phase 2D: Federation, Packaging, and Optional AegisOS Image
 - [ ] ActivityPub federation
-- [ ] Desktop app (Tauri 2.0)
+- [ ] Auxiliary `aegis-web` service/API surface
+- [ ] Ecosystem packaging and creator/distribution tooling
+- [ ] Immutable AegisOS image as packaging/hardening for the mature runtime
 
 ---
 
-## 7. Wire Protocol (PQ-WireGuard)
+## 7. Canonical Runtime Topology
+
+- **`aegis-desktop`** is intended to become the primary **Aegis Browser / runtime shell**.
+- **`aegis-cli`** is the bootstrap, ops, automation, and diagnostics interface.
+- **`aegis-web`** is a future auxiliary service/API/web surface, not the main sovereign runtime.
+- **`aegis-sanctuary`** is a transport/server primitive for optional private/shared-node roles, not a mandatory central dependency.
+- **AegisOS** is a later immutable packaging target built on top of the runtime once the browser/private-node stack is real.
+
+---
+
+## 8. Wire Protocol (PQ-WireGuard)
 
 The Aegis tunnel uses a WireGuard-inspired protocol extended with hybrid
 post-quantum key encapsulation.
@@ -319,7 +329,7 @@ Today this protocol is implemented for gateway ↔ Sanctuary transport. The
 intended private-node architecture is expected to reuse or adapt this transport
 for direct node-to-node connections rather than requiring a permanent platform hop.
 
-### 7.1 Handshake (Noise IK + Hybrid KEM)
+### 8.1 Handshake (Noise IK + Hybrid KEM)
 
 ```text
 Initiator (Client)                         Responder (Sanctuary)
@@ -336,7 +346,7 @@ derive transport keys
         ◀════════ encrypted tunnel data ════════▶
 ```
 
-### 7.2 Transport Packet Format
+### 8.2 Transport Packet Format
 
 ```text
 ┌──────────────┬──────────┬──────────────────────┬──────────┐
@@ -350,7 +360,7 @@ derive transport keys
 - **Encrypted Payload:** ChaCha20-Poly1305 AEAD with nonce derived from counter.
 - **Auth Tag:** 16-byte Poly1305 tag.
 
-### 7.3 Key Rotation
+### 8.3 Key Rotation
 
 Transport keys are rotated after 2^64 - 1 packets or a configurable time
 interval (default: 120 seconds, matching WireGuard's `REKEY_AFTER_TIME`).
@@ -361,9 +371,9 @@ is ~10× slower than classical WireGuard).
 
 ---
 
-## 8. Node Topology & Sanctuary Role
+## 9. Node Topology & Sanctuary Role
 
-### 8.1 Intended Topology (Planned)
+### 9.1 Intended Topology (Planned)
 
 The target social architecture is:
 
@@ -388,7 +398,7 @@ Core implications:
 3. The core product should remain functional with only user-run nodes.
 4. Any bootstrap/discovery infrastructure should help peers find one another without becoming a content host or permanent dependency.
 
-### 8.2 Discovery Model (Planned)
+### 9.2 Discovery Model (Planned)
 
 Discovery is the main new systems problem introduced by the private-node-first design.
 
@@ -398,7 +408,7 @@ Planned progression:
 2. **Bootstrap discovery nodes:** minimal well-known nodes provide peer hints but are not in the data path.
 3. **DID document resolution:** `did:aegis` records advertise current node/discovery endpoints.
 
-### 8.3 Sanctuary Role in the New Architecture
+### 9.3 Sanctuary Role in the New Architecture
 
 `aegis-sanctuary` remains important, but its role changes:
 
@@ -407,7 +417,7 @@ Planned progression:
 - it can power opt-in shared/community/platform spaces,
 - it may support optional bootstrap or relay-style infrastructure later, but those services are not prerequisites for the core product.
 
-### 8.4 Current Implemented Transport Primitive — ✅ IMPLEMENTED
+### 9.4 Current Implemented Transport Primitive — ✅ IMPLEMENTED
 
 The current Sanctuary server (`aegis-sanctuary`) consists of:
 
@@ -432,9 +442,9 @@ This implemented transport layer is useful for current testing, but it should no
 
 ---
 
-## 9. Identity Anchor (Layer 4)
+## 10. Identity Anchor (Layer 4)
 
-### 9.1 Key Hierarchy
+### 10.1 Key Hierarchy
 
 ```text
 Root identity (ML-DSA-65 signing + hybrid KEM)
@@ -449,7 +459,7 @@ Current implementation:
 - `RootIdentity::issue_device()` generates a primary device identity and signs a device VC.
 - `DeviceIdentity::derive_session_key()` / `derive_storage_key()` provide local key-hierarchy primitives for subsequent layers.
 
-### 9.2 Decentralized Identifiers
+### 10.2 Decentralized Identifiers
 
 Aegis currently uses a local `did:aegis` method derived from the root signing public key:
 
@@ -465,7 +475,7 @@ The DID document contains:
 
 Current implementation note: local DID documents are emitted as JSON by the CLI and can already advertise manual private-node endpoints for MVP discovery.
 
-### 9.3 Verifiable Credentials
+### 10.3 Verifiable Credentials
 
 W3C VC format signed with ML-DSA-65. Use cases:
 - Proving device ownership to a private node or optional shared node
@@ -476,9 +486,9 @@ Current implementation note: the `aegis-identity` crate now issues and verifies 
 
 ---
 
-## 10. Data Sovereignty Vault (Layer 5)
+## 11. Data Sovereignty Vault (Layer 5)
 
-### 10.1 Encryption Model
+### 11.1 Encryption Model
 
 Each file is encrypted with a unique key:
 
@@ -492,7 +502,7 @@ file_key = HKDF-SHA3-256(
 
 Encryption uses ChaCha20-Poly1305 AEAD with a random nonce per write.
 
-### 10.2 Storage Layout
+### 11.2 Storage Layout
 
 ```text
 vault/
@@ -512,7 +522,7 @@ vault/
 │   └── ...
 ```
 
-### 10.3 Sync Engine
+### 11.3 Sync Engine
 
 Multi-device sync uses CRDTs (Conflict-free Replicated Data Types):
 - **File operations:** LWW-Register (last-writer-wins by timestamp)
@@ -523,15 +533,15 @@ Current implementation note: `aegis-vault` now includes an encrypted per-file st
 
 ---
 
-## 11. Social Fabric (Layer 7)
+## 12. Social Fabric (Layer 7)
 
-### 11.0 Default Social Runtime
+### 12.0 Default Social Runtime
 
 The intended Layer 7 runtime is a user's **private node**, not a platform-owned server.
 Their vault, profile, room HTML/JSON, inventory, and messaging state live there by
 default. Shared rooms are additive, opt-in spaces layered on top of that baseline.
 
-### 11.1 PQ Double Ratchet
+### 12.1 PQ Double Ratchet
 
 Adapts the Signal Double Ratchet for post-quantum security:
 - DH ratchet step uses ML-KEM-768 instead of X25519
@@ -543,7 +553,7 @@ Properties:
 - Post-compromise security (self-healing after key compromise)
 - Quantum resistance via ML-KEM
 
-### 11.2 Group Messaging (MLS-inspired)
+### 12.2 Group Messaging (MLS-inspired)
 
 Tree-based group key agreement:
 - Binary tree with ML-KEM at each node
@@ -551,7 +561,7 @@ Tree-based group key agreement:
 - Epoch-based key rotation
 - Forward secrecy between epochs
 
-### 11.3 Federation (ActivityPub)
+### 12.3 Federation (ActivityPub)
 
 ActivityPub extensions for Aegis:
 - Standard ActivityPub for public posts
@@ -561,7 +571,7 @@ ActivityPub extensions for Aegis:
 
 ---
 
-## 12. Platform Matrix
+## 13. Platform Matrix
 
 | Feature              | Linux             | macOS              | Windows (future)   | iOS/Android (future) |
 |----------------------|-------------------|--------------------|--------------------|--------------------|
@@ -575,9 +585,9 @@ ActivityPub extensions for Aegis:
 
 ---
 
-## 13. Threat Model Summary
+## 14. Threat Model Summary
 
-### 13.1 Adversary Capabilities
+### 14.1 Adversary Capabilities
 
 | Adversary Class           | Capabilities                         | Mitigations                              |
 |---------------------------|--------------------------------------|------------------------------------------|
@@ -589,7 +599,7 @@ ActivityPub extensions for Aegis:
 | Malicious Discovery Node  | Fake or stale peer hints             | DID verification, signed records, retry  |
 | Supply Chain Attack       | Compromised dependencies             | `cargo-audit`, reproducible builds       |
 
-### 13.2 Trust Boundaries
+### 14.2 Trust Boundaries
 
 1. **TUN ↔ Pipeline** — Untrusted input; all packets validated before processing.
 2. **Private Node ↔ Remote Private/Shared Node** — Intended to be mutually authenticated via PQ transport + identity checks.
@@ -599,9 +609,9 @@ ActivityPub extensions for Aegis:
 
 ---
 
-## 14. CI/CD Pipeline
+## 15. CI/CD Pipeline
 
-### 14.1 Current Pipeline (`.github/workflows/ci.yml`)
+### 15.1 Current Pipeline (`.github/workflows/ci.yml`)
 
 | Job        | What It Does                           | Runs On        |
 |------------|----------------------------------------|----------------|
@@ -611,7 +621,7 @@ ActivityPub extensions for Aegis:
 | `test`     | `cargo test --workspace`               | ubuntu + macOS |
 | `audit`    | `cargo-audit` vulnerability scan       | ubuntu-latest  |
 
-### 14.2 Planned Additions
+### 15.2 Planned Additions
 
 | Job           | What It Does                                  | Priority |
 |---------------|-----------------------------------------------|----------|
@@ -623,9 +633,9 @@ ActivityPub extensions for Aegis:
 
 ---
 
-## 15. Technology Decisions
+## 16. Technology Decisions
 
-### 15.1 Why Rust?
+### 16.1 Why Rust?
 
 - Memory safety without GC (critical for crypto code)
 - Zero-cost abstractions for performance-sensitive packet pipeline
@@ -633,7 +643,7 @@ ActivityPub extensions for Aegis:
 - `zeroize` crate for deterministic secret wiping
 - Strong async ecosystem (tokio) for network I/O
 
-### 15.2 Why Hybrid KEM (X25519 + ML-KEM-768)?
+### 16.2 Why Hybrid KEM (X25519 + ML-KEM-768)?
 
 - **Defense in depth:** If ML-KEM is broken, X25519 still protects.
 - **If X25519 is broken by quantum computers**, ML-KEM-768 still protects.
@@ -641,28 +651,28 @@ ActivityPub extensions for Aegis:
   replayed in a different protocol context.
 - NIST Level 3 security (ML-KEM-768) matches our threat model.
 
-### 15.3 Why ChaCha20-Poly1305 over AES-GCM?
+### 16.3 Why ChaCha20-Poly1305 over AES-GCM?
 
 - Constant-time in software (no AES-NI required)
 - Better performance on ARM devices without hardware AES
 - Widely deployed and audited (used by WireGuard, TLS 1.3)
 - Avoids AES-GCM nonce-misuse catastrophe (though both require unique nonces)
 
-### 15.4 Why ML-DSA-65 (Dilithium3)?
+### 16.4 Why ML-DSA-65 (Dilithium3)?
 
 - NIST FIPS 204 standard (2024)
 - NIST Level 3 security (consistent with ML-KEM-768)
 - Reasonable signature size (~3.3 KB) for handshake messages
 - `pqcrypto-mldsa` crate (actively maintained, replaces deprecated `pqcrypto-dilithium`)
 
-### 15.5 Why tun2 over other TUN libraries?
+### 16.5 Why tun2 over other TUN libraries?
 
 - Actively maintained fork of the original `tun` crate
 - Async support via tokio (feature flag)
 - Cross-platform: Linux, macOS, Windows
 - v4 API: always delivers raw IP packets (no PI header confusion)
 
-### 15.6 Dependency Selection Criteria
+### 16.6 Dependency Selection Criteria
 
 1. **Actively maintained** — recent commits, responsive to issues
 2. **Audited where possible** — especially for crypto dependencies

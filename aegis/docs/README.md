@@ -14,10 +14,25 @@ core path, and shared Sanctuary nodes are optional spaces users may host or join
 Current transport/server crates are implemented foundations for that direction,
 not evidence that the full private-node social runtime already exists.
 
+The canonical sequencing is also repo-grounded now:
+
+1. finish the private-node substrate in identity + vault,
+2. turn `aegis-desktop` into the Aegis Browser / runtime shell,
+3. add direct visits, sync, messaging, and optional shared nodes,
+4. treat AegisOS as a later packaging and hardening target.
+
+## Current Repo Maturity
+
+- ✅ **Implemented:** `aegis-crypto`, `aegis-gateway`, `aegis-sanctuary`
+- 🟡 **Foundation implemented:** `aegis-identity`, `aegis-vault`
+- 🟧 **Placeholder:** `aegis-desktop`, `aegis-web`
+- 🔲 **Planned:** `aegis-social`, real sync/messaging/shared-node runtime, immutable AegisOS image
+
 ## Documentation Index
 
 | Document | Description |
 |----------|-------------|
+| [Aegis OS / Browser Plan](../../Aegis_OS_Browser_Plan.md) | Ground-truth sequencing for runtime, browser, and later AegisOS packaging |
 | [Architecture](architecture.md) | Full system architecture, wire protocol, deployment model |
 | [Cryptography](cryptography.md) | Algorithm suite, hybrid KEM construction, transport key derivation |
 | [Threat Model](threat-model.md) | Adversary capabilities, trust boundaries, mitigations |
@@ -43,8 +58,16 @@ The project is organized as a 7-layer Rust workspace:
 | App | Description | Status |
 |-----|-------------|--------|
 | `aegis-cli` | CLI: `aegis up/down/status/keygen`, `identity new/show`, `vault init` | ✅ Functional |
-| `aegis-desktop` | Tauri 2.0 desktop app | Placeholder |
-| `aegis-web` | Axum web server | Placeholder |
+| `aegis-desktop` | Future Aegis Browser / runtime shell | Placeholder |
+| `aegis-web` | Auxiliary status/API/web surface | Placeholder |
+
+## Milestone Map
+
+- **Phase 1 complete:** crypto + transport + Sanctuary
+- **Phase 2A:** identity/vault hardening
+- **Phase 2B:** private node runtime + browser shell
+- **Phase 2C:** sync + messaging + shared nodes
+- **Phase 2D:** federation + packaging + optional AegisOS image
 
 ## Getting Started
 
@@ -79,7 +102,10 @@ cargo run -p aegis-sanctuary -- --config sanctuary.toml
 cargo fmt --all --check
 
 # Lint
-cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
+
+# Typecheck/build validation
+cargo check --workspace --all-targets
 
 # Run fuzz tests (requires nightly)
 cd crates/aegis-crypto
