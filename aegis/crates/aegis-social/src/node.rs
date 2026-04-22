@@ -1,0 +1,345 @@
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use aegis_identity::runtime::{RuntimeIdentity, SignedNodeAdvertisement};
+use aegis_identity::storage::IdentityDirectory;
+use aegis_vault::store::{VaultStore, VaultUnlockMetadata};
+use serde::{Deserialize, Serialize};
+
+use crate::SocialError;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalNodeRecord {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub endpoints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub protocol_capabilities: Vec<String>,
+    pub runtime_version: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PeerTrustState {
+    Trusted,
+    Pending,
+    Blocked,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerRecord {
+    pub did: String,
+    pub trust_state: PeerTrustState,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pinned_endpoints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen_signed_record: Option<String>,
+    pub updated_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveConnection {
+    pub peer_did: String,
+    pub transport: String,
+    pub connected_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrivateNodeState {
+    pub owner_did: String,
+    pub identity_dir: PathBuf,
+    pub vault_dir: PathBuf,
+    pub local_record: LocalNodeRecord,
+    #[serde(default)]
+    pub peer_trust_store: BTreeMap<String, PeerRecord>,
+    #[serde(default)]
+    pub active_connections: Vec<ActiveConnection>,
+    #[serde(default)]
+    pub feature_flags: BTreeMap<String, bool>,
+}
+
+pub struct BootstrappedPrivateNode {
+    pub runtime_identity: RuntimeIdentity,
+    pub vault: VaultStore,
+    pub state: PrivateNodeState,
+    pub advertisement: SignedNodeAdvertisement,
+    pub unlock_metadata: VaultUnlockMetadata,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct RuntimeSettings {
+    pub schema_version: String,
+    pub owner_did: String,
+    #[serde(default)]
+    pub feature_flags: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub active_connections: Vec<String>,
+}
+
+impl PrivateNodeState {
+    pub fn new(
+        owner_did: impl Into<String>,
+        identity_dir: impl AsRef<Path>,
+        vault_dir: impl AsRef<Path>,
+    ) -> Self {
+        Self {
+            owner_did: owner_did.into(),
+            identity_dir: identity_dir.as_ref().to_path_buf(),
+            vault_dir: vault_dir.as_ref().to_path_buf(),
+            local_record: LocalNodeRecord {
+                endpoints: Vec::new(),
+                protocol_capabilities: default_protocol_capabilities(),
+                runtime_version: env!("CARGO_PKG_VERSION").into(),
+            },
+            peer_trust_store: BTreeMap::new(),
+            active_connections: Vec::new(),
+            feature_flags: BTreeMap::new(),
+        }
+    }
+
+    pub fn add_endpoint(&mut self, endpoint: impl Into<String>) {
+        let endpoint = endpoint.into();
+        if !self.local_record.endpoints.contains(&endpoint) {
+            self.local_record.endpoints.push(endpoint);
+        }
+    }
+
+    pub fn set_feature_flag(&mut self, name: impl Into<String>, enabled: bool) {
+        self.feature_flags.insert(name.into(), enabled);
+    }
+
+    pub fn set_peer_trust(
+        &mut self,
+        did: impl Into<String>,
+        trust_state: PeerTrustState,
+        pinned_endpoints: Vec<String>,
+    ) {
+        let did = did.into();
+        self.peer_trust_store.insert(
+            did.clone(),
+            PeerRecord {
+                did,
+                trust_state,
+                pinned_endpoints,
+                last_seen_signed_record: None,
+                updated_at: now_secs().unwrap_or_default(),
+            },
+        );
+    }
+
+    pub fn bootstrap(
+        identity_dir: impl AsRef<Path>,
+        vault_dir: impl AsRef<Path>,
+    ) -> Result<BootstrappedPrivateNode, SocialError> {
+        let identity_dir = identity_dir.as_ref().to_path_buf();
+        let vault_dir = vault_dir.as_ref().to_path_buf();
+
+        let identity_store = IdentityDirectory::new(&identity_dir);
+        let runtime_identity = identity_store
+            .load_runtime_identity()
+            .map_err(|err| SocialError::IdentityBootstrap(err.to_string()))?;
+        let known_peers = identity_store
+            .list_known_peers()
+            .map_err(|err| SocialError::IdentityBootstrap(err.to_string()))?;
+        let unlock_metadata = VaultStore::load_unlock_metadata(&vault_dir)
+            .map_err(|err| SocialError::VaultBootstrap(err.to_string()))?;
+        let vault = VaultStore::open_with_file_key(&vault_dir)
+            .map_err(|err| SocialError::VaultBootstrap(err.to_string()))?;
+        let runtime_settings: RuntimeSettings = vault
+            .read_json("runtime/settings.json")
+            .map_err(|err| SocialError::VaultBootstrap(err.to_string()))?;
+
+        if runtime_settings.owner_did != runtime_identity.owner_did() {
+            return Err(SocialError::InvalidNodeState(
+                "runtime settings owner DID does not match identity".into(),
+            ));
+        }
+
+        let mut state =
+            PrivateNodeState::new(runtime_identity.owner_did(), &identity_dir, &vault_dir);
+        for endpoint in runtime_identity.service_endpoints() {
+            state.add_endpoint(endpoint.endpoint.clone());
+        }
+        for peer in known_peers {
+            state.set_peer_trust(
+                peer.did,
+                PeerTrustState::from(peer.trust_state),
+                peer.pinned_endpoints,
+            );
+        }
+        for (flag, enabled) in runtime_settings.feature_flags {
+            state.set_feature_flag(flag, enabled);
+        }
+
+        let advertisement = runtime_identity
+            .sign_node_advertisement(
+                default_protocol_capabilities(),
+                env!("CARGO_PKG_VERSION"),
+                Some("vault://social/space/index.html".into()),
+                None,
+            )
+            .map_err(|err| SocialError::IdentityBootstrap(err.to_string()))?;
+
+        state.validate()?;
+        advertisement
+            .verify()
+            .map_err(|err| SocialError::IdentityBootstrap(err.to_string()))?;
+
+        Ok(BootstrappedPrivateNode {
+            runtime_identity,
+            vault,
+            state,
+            advertisement,
+            unlock_metadata,
+        })
+    }
+
+    pub fn record_signed_peer_record(
+        &mut self,
+        did: &str,
+        signed_record: impl Into<String>,
+    ) -> Result<(), SocialError> {
+        let peer = self
+            .peer_trust_store
+            .get_mut(did)
+            .ok_or_else(|| SocialError::InvalidNodeState(format!("unknown peer DID {did}")))?;
+        peer.last_seen_signed_record = Some(signed_record.into());
+        peer.updated_at = now_secs().unwrap_or_default();
+        Ok(())
+    }
+
+    pub fn record_connection(&mut self, peer_did: impl Into<String>, transport: impl Into<String>) {
+        self.active_connections.push(ActiveConnection {
+            peer_did: peer_did.into(),
+            transport: transport.into(),
+            connected_at: now_secs().unwrap_or_default(),
+        });
+    }
+
+    pub fn disconnect_peer(&mut self, peer_did: &str) {
+        self.active_connections
+            .retain(|connection| connection.peer_did != peer_did);
+    }
+
+    pub fn validate(&self) -> Result<(), SocialError> {
+        if self.owner_did.trim().is_empty() {
+            return Err(SocialError::InvalidNodeState(
+                "owner DID cannot be empty".into(),
+            ));
+        }
+        // The runtime bootstrap persists absolute identity/vault roots so later
+        // protocol handlers and desktop integrations do not depend on cwd state.
+        if !self.identity_dir.is_absolute() || !self.vault_dir.is_absolute() {
+            return Err(SocialError::InvalidNodeState(
+                "identity and vault paths must be absolute for deterministic runtime bootstrap"
+                    .into(),
+            ));
+        }
+        if self
+            .active_connections
+            .iter()
+            .any(|connection| !self.peer_trust_store.contains_key(&connection.peer_did))
+        {
+            return Err(SocialError::InvalidNodeState(
+                "active connection references unknown peer".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl From<aegis_identity::storage::PeerTrustState> for PeerTrustState {
+    fn from(value: aegis_identity::storage::PeerTrustState) -> Self {
+        match value {
+            aegis_identity::storage::PeerTrustState::Trusted => Self::Trusted,
+            aegis_identity::storage::PeerTrustState::Pending => Self::Pending,
+            aegis_identity::storage::PeerTrustState::Blocked => Self::Blocked,
+        }
+    }
+}
+
+fn now_secs() -> Result<u64, std::time::SystemTimeError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+}
+
+/// Default protocol capability surface for the planned browser/runtime shell:
+/// `vault://` for local vault-backed content, `node://` for direct private-node
+/// visits, and `sanctuary://` for optional shared-node spaces.
+fn default_protocol_capabilities() -> Vec<String> {
+    vec!["vault://".into(), "node://".into(), "sanctuary://".into()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn node_state_tracks_peer_trust_and_connections() {
+        let mut state =
+            PrivateNodeState::new("did:aegis:owner", "/tmp/aegis-identity", "/tmp/aegis-vault");
+        state.add_endpoint("udp://127.0.0.1:51820");
+        state.set_feature_flag("browser-shell", true);
+        state.set_peer_trust(
+            "did:aegis:peer",
+            PeerTrustState::Trusted,
+            vec!["udp://10.0.0.2:51820".into()],
+        );
+        state
+            .record_signed_peer_record("did:aegis:peer", "signed-node-record")
+            .unwrap();
+        state.record_connection("did:aegis:peer", "pqwg");
+
+        state.validate().unwrap();
+        assert!(state.feature_flags["browser-shell"]);
+        assert_eq!(state.active_connections.len(), 1);
+        assert_eq!(
+            state.peer_trust_store["did:aegis:peer"]
+                .last_seen_signed_record
+                .as_deref(),
+            Some("signed-node-record")
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unknown_active_peer() {
+        let mut state =
+            PrivateNodeState::new("did:aegis:owner", "/tmp/aegis-identity", "/tmp/aegis-vault");
+        state.record_connection("did:aegis:missing", "pqwg");
+
+        assert!(matches!(
+            state.validate(),
+            Err(SocialError::InvalidNodeState(_))
+        ));
+    }
+
+    #[test]
+    fn bootstrap_loads_identity_and_vault_state() {
+        let temp = tempdir().unwrap();
+        let identity_dir = temp.path().join("identity");
+        let vault_dir = temp.path().join("vault");
+
+        let identity_store = IdentityDirectory::new(&identity_dir);
+        let owner = identity_store.initialize("main-device", &[]).unwrap();
+
+        let master_key = VaultStore::generate_master_key();
+        let vault = VaultStore::init(&vault_dir, &master_key).unwrap();
+        VaultStore::write_master_key_file(&vault_dir, &master_key).unwrap();
+        vault
+            .initialize_social_layout(&owner.metadata.owner_did)
+            .unwrap();
+
+        let bootstrapped = PrivateNodeState::bootstrap(&identity_dir, &vault_dir).unwrap();
+        assert_eq!(bootstrapped.state.owner_did, owner.metadata.owner_did);
+        assert_eq!(
+            bootstrapped.unlock_metadata.mode,
+            aegis_vault::store::VaultUnlockMode::FileKey
+        );
+        assert_eq!(
+            bootstrapped.advertisement.advertisement.owner_did,
+            bootstrapped.runtime_identity.owner_did()
+        );
+        bootstrapped.state.validate().unwrap();
+    }
+}

@@ -34,6 +34,21 @@ impl SigningKeypair {
         }
     }
 
+    /// Reconstruct a signing keypair from serialized public and secret key bytes.
+    pub fn from_bytes(
+        public_key_bytes: &[u8],
+        secret_key_bytes: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let public_key = mldsa65::PublicKey::from_bytes(public_key_bytes)
+            .map_err(|_| CryptoError::SignatureError)?;
+        let secret_key = mldsa65::SecretKey::from_bytes(secret_key_bytes)
+            .map_err(|_| CryptoError::SignatureError)?;
+        Ok(Self {
+            public_key,
+            secret_key_bytes: Zeroizing::new(secret_key.as_bytes().to_vec()),
+        })
+    }
+
     /// Get the public key bytes.
     pub fn public_key_bytes(&self) -> Vec<u8> {
         self.public_key.as_bytes().to_vec()
@@ -134,5 +149,18 @@ mod tests {
         let pk_bytes = keypair.public_key_bytes();
         let pk = SigningPublicKey::from_bytes(&pk_bytes).unwrap();
         assert_eq!(pk.to_bytes(), pk_bytes);
+    }
+
+    #[test]
+    fn keypair_reconstruction_from_bytes() {
+        let keypair = SigningKeypair::generate();
+        let restored =
+            SigningKeypair::from_bytes(&keypair.public_key_bytes(), &keypair.secret_key_bytes())
+                .unwrap();
+
+        let message = b"restored signing keypair";
+        let signature = restored.sign(message).unwrap();
+        let public_key = SigningPublicKey::from_bytes(&restored.public_key_bytes()).unwrap();
+        public_key.verify(message, &signature).unwrap();
     }
 }

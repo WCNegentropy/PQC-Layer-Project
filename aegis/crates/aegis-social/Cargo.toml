@@ -8,4 +8,11 @@ repository.workspace = true
 description = "Social fabric (Layer 7) — PQ messaging, groups, federation"
 
 [dependencies]
+aegis-identity = { path = "../aegis-identity" }
+aegis-vault = { path = "../aegis-vault" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3"

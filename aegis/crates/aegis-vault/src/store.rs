@@ -18,6 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use aegis_crypto::{AeadCipher, AEAD_KEY_SIZE, AEAD_NONCE_SIZE};
 use hkdf::Hkdf;
 use rand::RngCore;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 
@@ -27,7 +28,9 @@ const MANIFEST_DIR: &str = ".aegis";
 const BLOBS_DIR: &str = ".aegis/blobs";
 const KEYS_DIR: &str = ".aegis/keys";
 const MANIFEST_FILE: &str = ".aegis/manifest.json";
+const UNLOCK_METADATA_FILE: &str = ".aegis/unlock.json";
 const FILE_KEY_INFO: &[u8] = b"aegis-vault-file-key-v1";
+const LEGACY_TIMESTAMP: u64 = 0;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct VaultManifest {
@@ -38,8 +41,130 @@ struct VaultManifest {
 struct ManifestEntry {
     blob_path: String,
     nonce: [u8; AEAD_NONCE_SIZE],
+    #[serde(default)]
+    created_at: u64,
     updated_at: u64,
     plaintext_len: usize,
+    #[serde(default)]
+    content_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    media_type: Option<String>,
+    #[serde(default)]
+    schema: VaultDocumentSchema,
+    #[serde(default)]
+    tombstone: bool,
+    #[serde(default)]
+    sync_generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    author_device: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    capability_labels: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultDocumentSchema {
+    SpaceHtml,
+    SpaceStyle,
+    SpaceMetadata,
+    CharacterProfile,
+    Inventory,
+    SocialProfile,
+    Feed,
+    Messages,
+    Peers,
+    SharedNodes,
+    Apps,
+    Runtime,
+    Cache,
+    #[default]
+    Generic,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WriteOptions {
+    pub author_device: Option<String>,
+    pub capability_labels: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VaultEntryMetadata {
+    pub logical_path: String,
+    pub blob_path: String,
+    pub plaintext_len: usize,
+    pub content_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    pub schema: VaultDocumentSchema,
+    pub created_at: u64,
+    pub updated_at: u64,
+    pub tombstone: bool,
+    pub sync_generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_device: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capability_labels: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultUnlockMode {
+    FileKey,
+    KeyringPreferred,
+    PassphraseWrapPlanned,
+    HardwareWrapPlanned,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VaultUnlockMetadata {
+    pub mode: VaultUnlockMode,
+    pub key_file: String,
+    pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IntegrityIssueKind {
+    MissingBlob,
+    OrphanBlob,
+    TombstoneBlobPresent,
+    CiphertextUndecryptable,
+    PlaintextLengthMismatch,
+    ContentHashMismatch,
+    DuplicateBlobReference,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntegrityIssue {
+    pub kind: IntegrityIssueKind,
+    pub logical_path: String,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VaultIntegrityReport {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub issues: Vec<IntegrityIssue>,
+}
+
+impl VaultIntegrityReport {
+    pub fn is_clean(&self) -> bool {
+        self.issues.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VaultRepairOptions {
+    pub remove_orphan_blobs: bool,
+    pub tombstone_missing_entries: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VaultRepairReport {
+    pub removed_orphan_blobs: Vec<String>,
+    pub tombstoned_entries: Vec<String>,
+    pub remaining_issues: Vec<IntegrityIssue>,
 }
 
 /// Minimal encrypted vault store with per-file AEAD encryption.
@@ -70,6 +195,12 @@ impl VaultStore {
             master_key: *master_key,
         };
         store.save_manifest(&VaultManifest::default())?;
+        store.save_unlock_metadata(&VaultUnlockMetadata {
+            mode: VaultUnlockMode::FileKey,
+            key_file: default_master_key_path(),
+            created_at: now_secs()?,
+            note: Some("file-based MVP unlock path".into()),
+        })?;
         Ok(store)
     }
 
@@ -88,8 +219,71 @@ impl VaultStore {
         })
     }
 
+    /// Open an existing vault using the file-based master key MVP.
+    pub fn open_with_file_key(root: impl AsRef<Path>) -> Result<Self, VaultError> {
+        let root = root.as_ref().to_path_buf();
+        let master_key = Self::read_master_key_file(&root)?;
+        Self::open(root, &master_key)
+    }
+
+    /// Persist the vault master key to the default file-based unlock location.
+    pub fn write_master_key_file(
+        root: impl AsRef<Path>,
+        master_key: &[u8; AEAD_KEY_SIZE],
+    ) -> Result<(), VaultError> {
+        let root = root.as_ref();
+        let key_path = root.join(default_master_key_path());
+        write_secure_bytes(&key_path, master_key)?;
+        let metadata = VaultUnlockMetadata {
+            mode: VaultUnlockMode::FileKey,
+            key_file: default_master_key_path(),
+            created_at: now_secs()?,
+            note: Some("file-based MVP unlock path".into()),
+        };
+        let metadata_path = root.join(UNLOCK_METADATA_FILE);
+        let contents = serde_json::to_vec_pretty(&metadata)
+            .map_err(|err| VaultError::Serialization(err.to_string()))?;
+        std::fs::write(metadata_path, contents)?;
+        Ok(())
+    }
+
+    /// Load the current vault unlock metadata, defaulting to the file-key MVP when absent.
+    pub fn load_unlock_metadata(root: impl AsRef<Path>) -> Result<VaultUnlockMetadata, VaultError> {
+        let root = root.as_ref();
+        let metadata_path = root.join(UNLOCK_METADATA_FILE);
+        if !metadata_path.exists() {
+            return Ok(VaultUnlockMetadata {
+                mode: VaultUnlockMode::FileKey,
+                key_file: default_master_key_path(),
+                created_at: 0,
+                note: Some("defaulted to file-based MVP unlock path".into()),
+            });
+        }
+        let contents = std::fs::read_to_string(metadata_path)?;
+        serde_json::from_str(&contents).map_err(|err| VaultError::Serialization(err.to_string()))
+    }
+
+    /// Read the persisted file-based vault master key.
+    pub fn read_master_key_file(root: impl AsRef<Path>) -> Result<[u8; AEAD_KEY_SIZE], VaultError> {
+        let metadata = Self::load_unlock_metadata(root.as_ref())?;
+        let bytes = std::fs::read(root.as_ref().join(metadata.key_file))?;
+        bytes
+            .try_into()
+            .map_err(|_| VaultError::Serialization("invalid master key length".into()))
+    }
+
     /// Write an encrypted file to the vault.
     pub fn write(&self, logical_path: &str, plaintext: &[u8]) -> Result<(), VaultError> {
+        self.write_with_options(logical_path, plaintext, &WriteOptions::default())
+    }
+
+    /// Write an encrypted file to the vault with optional author/capability metadata.
+    pub fn write_with_options(
+        &self,
+        logical_path: &str,
+        plaintext: &[u8],
+        options: &WriteOptions,
+    ) -> Result<(), VaultError> {
         let logical_path = normalize_logical_path(logical_path)?;
         let key = self.derive_file_key(&logical_path)?;
         let cipher = AeadCipher::new(&key);
@@ -105,8 +299,10 @@ impl VaultStore {
         std::fs::write(&blob_path, ciphertext)?;
 
         let mut manifest = self.load_manifest()?;
+        let now = now_secs()?;
+        let prior_entry = manifest.entries.get(&logical_path).cloned();
         manifest.entries.insert(
-            logical_path,
+            logical_path.clone(),
             ManifestEntry {
                 blob_path: blob_path
                     .strip_prefix(&self.root)
@@ -114,8 +310,23 @@ impl VaultStore {
                     .to_string_lossy()
                     .to_string(),
                 nonce,
-                updated_at: now_secs()?,
+                created_at: prior_entry
+                    .as_ref()
+                    .map(|entry| entry.created_at)
+                    .filter(|value| is_initialized_timestamp(*value))
+                    .unwrap_or(now),
+                updated_at: now,
                 plaintext_len: plaintext.len(),
+                content_hash: content_hash(plaintext),
+                media_type: infer_media_type(&logical_path),
+                schema: infer_schema(&logical_path),
+                tombstone: false,
+                sync_generation: prior_entry
+                    .as_ref()
+                    .map(|entry| entry.sync_generation.saturating_add(1))
+                    .unwrap_or(1),
+                author_device: options.author_device.clone(),
+                capability_labels: options.capability_labels.clone(),
             },
         );
         self.save_manifest(&manifest)
@@ -129,6 +340,9 @@ impl VaultStore {
             .entries
             .get(&logical_path)
             .ok_or_else(|| VaultError::NotFound(logical_path.clone()))?;
+        if entry.tombstone {
+            return Err(VaultError::NotFound(logical_path));
+        }
         let ciphertext = std::fs::read(self.root.join(&entry.blob_path))?;
         let key = self.derive_file_key(&logical_path)?;
         let cipher = AeadCipher::new(&key);
@@ -144,19 +358,228 @@ impl VaultStore {
         let mut manifest = self.load_manifest()?;
         let entry = manifest
             .entries
-            .remove(&logical_path)
+            .get_mut(&logical_path)
             .ok_or_else(|| VaultError::NotFound(logical_path.clone()))?;
-        let blob_path = self.root.join(entry.blob_path);
+        let blob_path = self.root.join(&entry.blob_path);
         if blob_path.exists() {
             std::fs::remove_file(blob_path)?;
         }
+        entry.tombstone = true;
+        entry.updated_at = now_secs()?;
+        entry.sync_generation = entry.sync_generation.saturating_add(1);
+        entry.plaintext_len = 0;
+        entry.content_hash.clear();
         self.save_manifest(&manifest)
     }
 
     /// List the logical files currently stored in the vault.
     pub fn list(&self) -> Result<Vec<String>, VaultError> {
         let manifest = self.load_manifest()?;
-        Ok(manifest.entries.keys().cloned().collect())
+        Ok(manifest
+            .entries
+            .iter()
+            .filter(|(_, entry)| !entry.tombstone)
+            .map(|(path, _)| path.clone())
+            .collect())
+    }
+
+    /// List direct children under a logical directory.
+    pub fn list_directory(&self, logical_dir: &str) -> Result<Vec<String>, VaultError> {
+        let prefix = normalize_directory_prefix(logical_dir)?;
+        let manifest = self.load_manifest()?;
+        let mut children = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for (path, entry) in &manifest.entries {
+            if entry.tombstone {
+                continue;
+            }
+            if let Some(child) = immediate_child(path, prefix.as_deref()) {
+                if seen.insert(child.clone()) {
+                    children.push(child);
+                }
+            }
+        }
+        Ok(children)
+    }
+
+    /// Return metadata for all entries, optionally filtered to a logical prefix.
+    pub fn list_metadata(
+        &self,
+        logical_prefix: Option<&str>,
+    ) -> Result<Vec<VaultEntryMetadata>, VaultError> {
+        let prefix = match logical_prefix {
+            Some(prefix) => normalize_directory_prefix(prefix)?,
+            None => None,
+        };
+        let manifest = self.load_manifest()?;
+        Ok(manifest
+            .entries
+            .iter()
+            .filter(|(path, _)| matches_prefix(path, prefix.as_deref()))
+            .map(|(logical_path, entry)| VaultEntryMetadata {
+                logical_path: logical_path.clone(),
+                blob_path: entry.blob_path.clone(),
+                plaintext_len: entry.plaintext_len,
+                content_hash: entry.content_hash.clone(),
+                media_type: entry.media_type.clone(),
+                schema: entry.schema.clone(),
+                created_at: entry.created_at,
+                updated_at: entry.updated_at,
+                tombstone: entry.tombstone,
+                sync_generation: entry.sync_generation,
+                author_device: entry.author_device.clone(),
+                capability_labels: entry.capability_labels.clone(),
+            })
+            .collect())
+    }
+
+    /// Serialize a JSON value and store it in the vault.
+    pub fn write_json<T: Serialize>(
+        &self,
+        logical_path: &str,
+        value: &T,
+    ) -> Result<(), VaultError> {
+        let bytes = serde_json::to_vec_pretty(value)
+            .map_err(|err| VaultError::Serialization(err.to_string()))?;
+        self.write(logical_path, &bytes)
+    }
+
+    /// Read a JSON document from the vault and deserialize it.
+    pub fn read_json<T: DeserializeOwned>(&self, logical_path: &str) -> Result<T, VaultError> {
+        let bytes = self.read(logical_path)?;
+        serde_json::from_slice(&bytes).map_err(|err| VaultError::Serialization(err.to_string()))
+    }
+
+    /// Validate manifest/blob consistency and detect repairable integrity issues.
+    pub fn validate_integrity(&self) -> Result<VaultIntegrityReport, VaultError> {
+        let manifest = self.load_manifest()?;
+        let mut report = VaultIntegrityReport::default();
+        let mut referenced_blob_paths = BTreeMap::<String, String>::new();
+
+        for (logical_path, entry) in &manifest.entries {
+            if let Some(previous_owner) =
+                referenced_blob_paths.insert(entry.blob_path.clone(), logical_path.clone())
+            {
+                report.issues.push(IntegrityIssue {
+                    kind: IntegrityIssueKind::DuplicateBlobReference,
+                    logical_path: logical_path.clone(),
+                    detail: format!("blob also referenced by {previous_owner}"),
+                });
+            }
+
+            let blob_path = self.root.join(&entry.blob_path);
+            if entry.tombstone {
+                if blob_path.exists() {
+                    report.issues.push(IntegrityIssue {
+                        kind: IntegrityIssueKind::TombstoneBlobPresent,
+                        logical_path: logical_path.clone(),
+                        detail: "tombstoned entry still has an encrypted blob".into(),
+                    });
+                }
+                continue;
+            }
+
+            if !blob_path.exists() {
+                report.issues.push(IntegrityIssue {
+                    kind: IntegrityIssueKind::MissingBlob,
+                    logical_path: logical_path.clone(),
+                    detail: format!("missing blob {}", entry.blob_path),
+                });
+                continue;
+            }
+
+            let ciphertext = std::fs::read(&blob_path)?;
+            let key = self.derive_file_key(logical_path)?;
+            let cipher = AeadCipher::new(&key);
+            let plaintext = match cipher.decrypt(&entry.nonce, &ciphertext, logical_path.as_bytes())
+            {
+                Ok(bytes) => bytes.to_vec(),
+                Err(err) => {
+                    report.issues.push(IntegrityIssue {
+                        kind: IntegrityIssueKind::CiphertextUndecryptable,
+                        logical_path: logical_path.clone(),
+                        detail: err.to_string(),
+                    });
+                    continue;
+                }
+            };
+
+            if plaintext.len() != entry.plaintext_len {
+                report.issues.push(IntegrityIssue {
+                    kind: IntegrityIssueKind::PlaintextLengthMismatch,
+                    logical_path: logical_path.clone(),
+                    detail: format!(
+                        "expected {} bytes, recovered {} bytes",
+                        entry.plaintext_len,
+                        plaintext.len()
+                    ),
+                });
+            }
+            if content_hash(&plaintext) != entry.content_hash {
+                report.issues.push(IntegrityIssue {
+                    kind: IntegrityIssueKind::ContentHashMismatch,
+                    logical_path: logical_path.clone(),
+                    detail: "content hash does not match decrypted plaintext".into(),
+                });
+            }
+        }
+
+        for blob_path in self.list_blob_files()? {
+            let relative = blob_path
+                .strip_prefix(&self.root)
+                .unwrap_or(&blob_path)
+                .to_string_lossy()
+                .to_string();
+            if !referenced_blob_paths.contains_key(&relative) {
+                report.issues.push(IntegrityIssue {
+                    kind: IntegrityIssueKind::OrphanBlob,
+                    logical_path: relative.clone(),
+                    detail: "blob exists on disk without a manifest entry".into(),
+                });
+            }
+        }
+
+        Ok(report)
+    }
+
+    /// Apply conservative repairs for missing-entry tombstones and orphan blob cleanup.
+    pub fn repair_integrity(
+        &self,
+        options: &VaultRepairOptions,
+    ) -> Result<VaultRepairReport, VaultError> {
+        let mut manifest = self.load_manifest()?;
+        let report = self.validate_integrity()?;
+        let mut repair = VaultRepairReport::default();
+
+        for issue in &report.issues {
+            match issue.kind {
+                IntegrityIssueKind::OrphanBlob if options.remove_orphan_blobs => {
+                    let orphan_path = self.root.join(&issue.logical_path);
+                    if orphan_path.exists() {
+                        std::fs::remove_file(&orphan_path)?;
+                        repair.removed_orphan_blobs.push(issue.logical_path.clone());
+                    }
+                }
+                IntegrityIssueKind::MissingBlob if options.tombstone_missing_entries => {
+                    if let Some(entry) = manifest.entries.get_mut(&issue.logical_path) {
+                        entry.tombstone = true;
+                        entry.plaintext_len = 0;
+                        entry.content_hash.clear();
+                        entry.updated_at = now_secs()?;
+                        entry.sync_generation = entry.sync_generation.saturating_add(1);
+                        repair.tombstoned_entries.push(issue.logical_path.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if !repair.tombstoned_entries.is_empty() {
+            self.save_manifest(&manifest)?;
+        }
+
+        repair.remaining_issues = self.validate_integrity()?.issues;
+        Ok(repair)
     }
 
     /// Bootstrap the private-node social layout defined by the project spec.
@@ -254,6 +677,64 @@ impl VaultStore {
                 }))
                 .map_err(|err| VaultError::CryptoError(err.to_string()))?,
             ),
+            (
+                "social/messages/inbox.json",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": "1.0",
+                    "messages": []
+                }))
+                .map_err(|err| VaultError::CryptoError(err.to_string()))?,
+            ),
+            (
+                "social/messages/sent.json",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": "1.0",
+                    "messages": []
+                }))
+                .map_err(|err| VaultError::CryptoError(err.to_string()))?,
+            ),
+            (
+                "social/peers/known.json",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": "1.0",
+                    "peers": []
+                }))
+                .map_err(|err| VaultError::CryptoError(err.to_string()))?,
+            ),
+            (
+                "social/shared_nodes/registry.json",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": "1.0",
+                    "nodes": []
+                }))
+                .map_err(|err| VaultError::CryptoError(err.to_string()))?,
+            ),
+            (
+                "apps/registry.json",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": "1.0",
+                    "apps": []
+                }))
+                .map_err(|err| VaultError::CryptoError(err.to_string()))?,
+            ),
+            (
+                "runtime/settings.json",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": "1.0",
+                    "owner_did": owner_did,
+                    "feature_flags": {},
+                    "active_connections": []
+                }))
+                .map_err(|err| VaultError::CryptoError(err.to_string()))?,
+            ),
+            (
+                "cache/index.json",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": "1.0",
+                    "entries": []
+                }))
+                .map_err(|err| VaultError::CryptoError(err.to_string()))?,
+            ),
         ];
 
         let mut created = Vec::with_capacity(defaults.len());
@@ -287,15 +768,27 @@ impl VaultStore {
     fn load_manifest(&self) -> Result<VaultManifest, VaultError> {
         let manifest_path = self.root.join(MANIFEST_FILE);
         let contents = std::fs::read_to_string(manifest_path)?;
-        serde_json::from_str(&contents).map_err(|err| VaultError::CryptoError(err.to_string()))
+        serde_json::from_str(&contents).map_err(|err| VaultError::Serialization(err.to_string()))
     }
 
     fn save_manifest(&self, manifest: &VaultManifest) -> Result<(), VaultError> {
         let manifest_path = self.root.join(MANIFEST_FILE);
         let contents = serde_json::to_string_pretty(manifest)
-            .map_err(|err| VaultError::CryptoError(err.to_string()))?;
+            .map_err(|err| VaultError::Serialization(err.to_string()))?;
         std::fs::write(manifest_path, contents)?;
         Ok(())
+    }
+
+    fn save_unlock_metadata(&self, metadata: &VaultUnlockMetadata) -> Result<(), VaultError> {
+        let metadata_path = self.root.join(UNLOCK_METADATA_FILE);
+        let contents = serde_json::to_string_pretty(metadata)
+            .map_err(|err| VaultError::Serialization(err.to_string()))?;
+        std::fs::write(metadata_path, contents)?;
+        Ok(())
+    }
+
+    fn list_blob_files(&self) -> Result<Vec<PathBuf>, VaultError> {
+        collect_files_recursively(&self.root.join(BLOBS_DIR))
     }
 }
 
@@ -326,6 +819,112 @@ fn now_secs() -> Result<u64, VaultError> {
         .map_err(|err| VaultError::CryptoError(err.to_string()))
 }
 
+fn default_master_key_path() -> String {
+    format!("{KEYS_DIR}/master.key")
+}
+
+fn write_secure_bytes(path: &Path, contents: &[u8]) -> Result<(), VaultError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, contents)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+fn collect_files_recursively(path: &Path) -> Result<Vec<PathBuf>, VaultError> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            files.extend(collect_files_recursively(&entry_path)?);
+        } else if entry_path.is_file() {
+            files.push(entry_path);
+        }
+    }
+    Ok(files)
+}
+
+fn normalize_directory_prefix(path: &str) -> Result<Option<String>, VaultError> {
+    let trimmed = path.trim_matches('/');
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(normalize_logical_path(trimmed)?))
+}
+
+fn immediate_child(path: &str, prefix: Option<&str>) -> Option<String> {
+    let suffix = match prefix {
+        Some(prefix) => path.strip_prefix(prefix)?.strip_prefix('/')?,
+        None => path,
+    };
+    suffix.split('/').next().map(str::to_string)
+}
+
+fn matches_prefix(path: &str, prefix: Option<&str>) -> bool {
+    match prefix {
+        Some(prefix) => path == prefix || path.starts_with(&format!("{prefix}/")),
+        None => true,
+    }
+}
+
+fn content_hash(bytes: &[u8]) -> String {
+    let digest = Sha3_256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn is_initialized_timestamp(value: u64) -> bool {
+    // `0` is reserved for legacy/migrated entries where creation time was not recorded.
+    value != LEGACY_TIMESTAMP
+}
+
+fn infer_media_type(logical_path: &str) -> Option<String> {
+    let extension = Path::new(logical_path).extension()?.to_string_lossy();
+    Some(
+        match extension.as_ref() {
+            "html" => "text/html",
+            "css" => "text/css",
+            "json" => "application/json",
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "svg" => "image/svg+xml",
+            "txt" => "text/plain",
+            _ => "application/octet-stream",
+        }
+        .to_string(),
+    )
+}
+
+fn infer_schema(logical_path: &str) -> VaultDocumentSchema {
+    match logical_path {
+        "social/space/index.html" => VaultDocumentSchema::SpaceHtml,
+        "social/space/style.css" => VaultDocumentSchema::SpaceStyle,
+        "social/space/room.json" => VaultDocumentSchema::SpaceMetadata,
+        "social/character/avatar.json" | "social/character/equipped.json" => {
+            VaultDocumentSchema::CharacterProfile
+        }
+        "social/inventory/inventory.json" => VaultDocumentSchema::Inventory,
+        "social/profile/profile.json" => VaultDocumentSchema::SocialProfile,
+        "social/feed/posts.json" => VaultDocumentSchema::Feed,
+        path if path.starts_with("social/messages/") => VaultDocumentSchema::Messages,
+        path if path.starts_with("social/peers/") => VaultDocumentSchema::Peers,
+        path if path.starts_with("social/shared_nodes/") => VaultDocumentSchema::SharedNodes,
+        path if path.starts_with("apps/") => VaultDocumentSchema::Apps,
+        path if path.starts_with("runtime/") => VaultDocumentSchema::Runtime,
+        path if path.starts_with("cache/") => VaultDocumentSchema::Cache,
+        _ => VaultDocumentSchema::Generic,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
@@ -353,9 +952,128 @@ mod tests {
             .unwrap();
 
         assert!(created.contains(&"social/space/index.html".to_string()));
+        assert!(created.contains(&"runtime/settings.json".to_string()));
+        assert!(created.contains(&"social/messages/inbox.json".to_string()));
         let profile = vault.read("social/profile/profile.json").unwrap();
         assert!(String::from_utf8(profile)
             .unwrap()
             .contains("did:aegis:demo-owner"));
+    }
+
+    #[test]
+    fn metadata_and_json_helpers_work() {
+        let dir = tempdir().unwrap();
+        let master_key = VaultStore::generate_master_key();
+        let vault = VaultStore::init(dir.path(), &master_key).unwrap();
+
+        vault
+            .write_json(
+                "runtime/settings.json",
+                &serde_json::json!({"schema_version": "1.0", "feature_flags": {"browser": true}}),
+            )
+            .unwrap();
+
+        let document: serde_json::Value = vault.read_json("runtime/settings.json").unwrap();
+        assert_eq!(document["feature_flags"]["browser"], true);
+
+        let metadata = vault.list_metadata(Some("runtime")).unwrap();
+        assert_eq!(metadata.len(), 1);
+        assert_eq!(metadata[0].schema, VaultDocumentSchema::Runtime);
+        assert_eq!(metadata[0].media_type.as_deref(), Some("application/json"));
+        assert!(!metadata[0].content_hash.is_empty());
+
+        let children = vault.list_directory("runtime").unwrap();
+        assert_eq!(children, vec!["settings.json".to_string()]);
+    }
+
+    #[test]
+    fn delete_marks_tombstone_without_listing_file() {
+        let dir = tempdir().unwrap();
+        let master_key = VaultStore::generate_master_key();
+        let vault = VaultStore::init(dir.path(), &master_key).unwrap();
+
+        vault.write("social/feed/posts.json", b"{}").unwrap();
+        vault.delete("social/feed/posts.json").unwrap();
+
+        assert!(matches!(
+            vault.read("social/feed/posts.json"),
+            Err(VaultError::NotFound(_))
+        ));
+        assert!(vault.list().unwrap().is_empty());
+        assert!(vault.list_metadata(Some("social/feed")).unwrap()[0].tombstone);
+    }
+
+    #[test]
+    fn file_based_unlock_roundtrip() {
+        let dir = tempdir().unwrap();
+        let master_key = VaultStore::generate_master_key();
+        let vault = VaultStore::init(dir.path(), &master_key).unwrap();
+        VaultStore::write_master_key_file(dir.path(), &master_key).unwrap();
+
+        vault
+            .write("documents/secret.txt", b"open via unlock metadata")
+            .unwrap();
+
+        let reopened = VaultStore::open_with_file_key(dir.path()).unwrap();
+        let unlock_metadata = VaultStore::load_unlock_metadata(dir.path()).unwrap();
+        assert_eq!(unlock_metadata.mode, VaultUnlockMode::FileKey);
+        assert_eq!(
+            reopened.read("documents/secret.txt").unwrap(),
+            b"open via unlock metadata"
+        );
+    }
+
+    #[test]
+    fn integrity_validation_detects_orphans_and_can_repair() {
+        let dir = tempdir().unwrap();
+        let master_key = VaultStore::generate_master_key();
+        let vault = VaultStore::init(dir.path(), &master_key).unwrap();
+
+        vault.write("documents/hello.txt", b"vault secret").unwrap();
+        let orphan_dir = dir.path().join(BLOBS_DIR).join("zz");
+        std::fs::create_dir_all(&orphan_dir).unwrap();
+        std::fs::write(orphan_dir.join("orphan.blob"), b"junk").unwrap();
+
+        let report = vault.validate_integrity().unwrap();
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.kind == IntegrityIssueKind::OrphanBlob));
+
+        let repair = vault
+            .repair_integrity(&VaultRepairOptions {
+                remove_orphan_blobs: true,
+                tombstone_missing_entries: true,
+            })
+            .unwrap();
+        assert_eq!(repair.removed_orphan_blobs.len(), 1);
+        assert!(repair.remaining_issues.is_empty());
+    }
+
+    #[test]
+    fn integrity_repair_tombstones_missing_blob_entries() {
+        let dir = tempdir().unwrap();
+        let master_key = VaultStore::generate_master_key();
+        let vault = VaultStore::init(dir.path(), &master_key).unwrap();
+
+        vault.write("documents/hello.txt", b"vault secret").unwrap();
+        let metadata = vault.list_metadata(Some("documents")).unwrap();
+        std::fs::remove_file(dir.path().join(&metadata[0].blob_path)).unwrap();
+
+        let repair = vault
+            .repair_integrity(&VaultRepairOptions {
+                remove_orphan_blobs: false,
+                tombstone_missing_entries: true,
+            })
+            .unwrap();
+
+        assert_eq!(
+            repair.tombstoned_entries,
+            vec!["documents/hello.txt".to_string()]
+        );
+        assert!(matches!(
+            vault.read("documents/hello.txt"),
+            Err(VaultError::NotFound(_))
+        ));
     }
 }
