@@ -126,14 +126,7 @@ impl DeviceIdentity {
     }
 
     fn derive_key(&self, label: &str, context: &str) -> [u8; 32] {
-        let secret_bytes = self.exchange_secret_key.to_bytes();
-        let mut hasher = Sha3_256::new();
-        hasher.update(&secret_bytes);
-        hasher.update(label.as_bytes());
-        hasher.update(context.as_bytes());
-        let mut output = [0u8; 32];
-        output.copy_from_slice(&hasher.finalize());
-        output
+        derive_context_key(&self.exchange_secret_key, label, context)
     }
 
     pub fn owner_did(&self) -> &Did {
@@ -163,6 +156,22 @@ impl DeviceIdentity {
     pub fn attestation(&self) -> &Credential {
         &self.attestation
     }
+}
+
+/// Derive a stable 32-byte key from hybrid exchange secret material.
+pub fn derive_context_key(
+    exchange_secret_key: &HybridSecretKey,
+    label: &str,
+    context: &str,
+) -> [u8; 32] {
+    let secret_bytes = exchange_secret_key.to_bytes();
+    let mut hasher = Sha3_256::new();
+    hasher.update(&secret_bytes);
+    hasher.update(label.as_bytes());
+    hasher.update(context.as_bytes());
+    let mut output = [0u8; 32];
+    output.copy_from_slice(&hasher.finalize());
+    output
 }
 
 #[cfg(test)]

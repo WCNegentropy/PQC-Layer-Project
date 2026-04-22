@@ -379,7 +379,7 @@ Standardize on-disk layout for:
 - rotation history
 - backup metadata
 
-#### 1.1.2 Formalize login identity lifecycle
+#### 1.1.2 Formalize login identity lifecycle — COMPLETED ✅
 Promote identity from “CLI-generated material” into:
 - node owner identity
 - device login identity
@@ -391,7 +391,7 @@ This should enable the desktop app to:
 - unlock vault,
 - initialize network runtime.
 
-#### 1.1.3 Key rotation and recovery model
+#### 1.1.3 Key rotation and recovery model — COMPLETED ✅
 Implement design and scaffolding for:
 - root key rotation
 - device re-issuance
@@ -409,7 +409,7 @@ Add structures for:
 - pinned discovery endpoints
 - last-seen signed node records
 
-#### 1.1.5 Signed node advertisement model
+#### 1.1.5 Signed node advertisement model — COMPLETED ✅
 Use DID/service records as the basis for:
 - current node endpoint
 - protocol capabilities
@@ -463,7 +463,7 @@ Add higher-level vault APIs for:
 - delete/tombstone semantics
 - batched updates / transactions
 
-#### 1.2.4 Integrity and repair tooling
+#### 1.2.4 Integrity and repair tooling — COMPLETED ✅
 Implement utilities for:
 - manifest validation
 - orphan blob cleanup
@@ -471,7 +471,7 @@ Implement utilities for:
 - nonce/key mismatch handling
 - vault consistency repair
 
-#### 1.2.5 Vault unlocking model
+#### 1.2.5 Vault unlocking model — COMPLETED ✅
 Define how vault master keys are handled:
 - file-based MVP
 - keyring-backed preferred path

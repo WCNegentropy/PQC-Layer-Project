@@ -1,11 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use aegis_crypto::{HybridPublicKey, HybridSecretKey, SigningKeypair};
 use serde::{Deserialize, Serialize};
 
 use crate::credentials::Credential;
 use crate::did::{DidDocument, ServiceEndpoint};
 use crate::keys::RootIdentity;
+use crate::runtime::RuntimeIdentity;
 use crate::IdentityError;
 
 const CONTRACT_VERSION: u32 = 1;
@@ -24,6 +26,7 @@ const TRUST_STORE_FILE: &str = "trust/peers.json";
 const DISCOVERY_FILE: &str = "discovery/endpoints.json";
 const ROTATION_HISTORY_FILE: &str = "rotation/history.json";
 const BACKUP_METADATA_FILE: &str = "backup/metadata.json";
+const JOIN_REQUESTS_FILE: &str = "devices/join-requests.json";
 const LEGACY_CONTRACT_VERSION: u32 = 0;
 const LEGACY_DID_FILE: &str = "did.txt";
 const LEGACY_DEVICE_NAME_FILE: &str = "device-name.txt";
@@ -67,15 +70,55 @@ pub struct KnownPeerRecord {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RotationRecord {
-    pub event: String,
+    pub event_id: String,
+    pub kind: RotationKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_device_slug: Option<String>,
+    pub status: RotationStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     pub recorded_at: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RotationKind {
+    RootKeyRotation,
+    DeviceReissuance,
+    DeviceRevocation,
+    RecoveryExport,
+    MultiDeviceJoin,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RotationStatus {
+    Planned,
+    Completed,
+    Revoked,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackupMetadata {
     pub strategy: String,
     pub requires_offline_copy: bool,
+    pub export_format: String,
     pub updated_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_exported_at: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceJoinRequest {
+    pub device_name: String,
+    pub device_slug: String,
+    pub requested_at: u64,
+    pub status: JoinRequestStatus,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum JoinRequestStatus {
+    Pending,
+    Approved,
+    Rejected,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -170,12 +213,15 @@ impl IdentityDirectory {
         write_json(&self.trust_store_path(), &Vec::<KnownPeerRecord>::new())?;
         write_json(&self.discovery_path(), &did_document.service)?;
         write_json(&self.rotation_history_path(), &Vec::<RotationRecord>::new())?;
+        write_json(&self.join_requests_path(), &Vec::<DeviceJoinRequest>::new())?;
         write_json(
             &self.backup_metadata_path(),
             &BackupMetadata {
                 strategy: "offline-copy-required".into(),
                 requires_offline_copy: true,
+                export_format: "identity-directory-v1".into(),
                 updated_at: created_at,
+                last_exported_at: None,
             },
         )?;
         std::fs::write(self.active_device_path(), &device_slug)?;
@@ -267,6 +313,69 @@ impl IdentityDirectory {
         )))
     }
 
+    pub fn load_runtime_identity(&self) -> Result<RuntimeIdentity, IdentityError> {
+        let stored = self.load()?;
+        let active_device_dir = self.device_dir(&stored.metadata.active_device_slug);
+        RuntimeIdentity::new(
+            stored,
+            self.load_signing_keypair(
+                &self.root.join(ROOT_DIR).join("signing.pub"),
+                &self.root.join(ROOT_DIR).join("signing.key"),
+            )?,
+            self.load_exchange_public_key(&self.root.join(ROOT_DIR).join("exchange.pub"))?,
+            self.load_exchange_secret_key(&self.root.join(ROOT_DIR).join("exchange.key"))?,
+            self.load_signing_keypair(
+                &active_device_dir.join("signing.pub"),
+                &active_device_dir.join("signing.key"),
+            )?,
+            self.load_exchange_public_key(&active_device_dir.join("exchange.pub"))?,
+            self.load_exchange_secret_key(&active_device_dir.join("exchange.key"))?,
+        )
+    }
+
+    pub fn list_rotation_history(&self) -> Result<Vec<RotationRecord>, IdentityError> {
+        read_json(&self.rotation_history_path())
+    }
+
+    pub fn list_known_peers(&self) -> Result<Vec<KnownPeerRecord>, IdentityError> {
+        read_json(&self.trust_store_path())
+    }
+
+    pub fn append_rotation_record(&self, record: RotationRecord) -> Result<(), IdentityError> {
+        let mut records = self.list_rotation_history()?;
+        records.push(record);
+        write_json(&self.rotation_history_path(), &records)
+    }
+
+    pub fn list_join_requests(&self) -> Result<Vec<DeviceJoinRequest>, IdentityError> {
+        read_json(&self.join_requests_path())
+    }
+
+    pub fn record_join_request(
+        &self,
+        device_name: impl Into<String>,
+    ) -> Result<DeviceJoinRequest, IdentityError> {
+        let device_name = device_name.into();
+        let request = DeviceJoinRequest {
+            device_slug: slugify_device_name(&device_name),
+            device_name,
+            requested_at: now_secs()?,
+            status: JoinRequestStatus::Pending,
+        };
+        let mut requests = self.list_join_requests()?;
+        requests.push(request.clone());
+        write_json(&self.join_requests_path(), &requests)?;
+        Ok(request)
+    }
+
+    pub fn update_backup_metadata(&self, metadata: BackupMetadata) -> Result<(), IdentityError> {
+        write_json(&self.backup_metadata_path(), &metadata)
+    }
+
+    pub fn load_backup_metadata(&self) -> Result<BackupMetadata, IdentityError> {
+        read_json(&self.backup_metadata_path())
+    }
+
     fn load_legacy(&self) -> Result<StoredIdentity, IdentityError> {
         let owner_did = std::fs::read_to_string(self.legacy_did_path())?
             .trim()
@@ -329,12 +438,36 @@ impl IdentityDirectory {
         self.root.join(BACKUP_METADATA_FILE)
     }
 
+    fn join_requests_path(&self) -> PathBuf {
+        self.root.join(JOIN_REQUESTS_FILE)
+    }
+
     fn device_dir(&self, device_slug: &str) -> PathBuf {
         self.root.join(DEVICES_DIR).join(device_slug)
     }
 
     fn legacy_did_path(&self) -> PathBuf {
         self.root.join(LEGACY_DID_FILE)
+    }
+
+    fn load_signing_keypair(
+        &self,
+        public_key_path: &Path,
+        secret_key_path: &Path,
+    ) -> Result<SigningKeypair, IdentityError> {
+        let public_key = std::fs::read(public_key_path)?;
+        let secret_key = std::fs::read(secret_key_path)?;
+        SigningKeypair::from_bytes(&public_key, &secret_key).map_err(IdentityError::from)
+    }
+
+    fn load_exchange_public_key(&self, path: &Path) -> Result<HybridPublicKey, IdentityError> {
+        let bytes = std::fs::read(path)?;
+        HybridPublicKey::from_bytes(&bytes).map_err(IdentityError::from)
+    }
+
+    fn load_exchange_secret_key(&self, path: &Path) -> Result<HybridSecretKey, IdentityError> {
+        let bytes = std::fs::read(path)?;
+        HybridSecretKey::from_bytes(&bytes).map_err(IdentityError::from)
     }
 }
 
@@ -420,6 +553,7 @@ mod tests {
             .exists());
         assert!(identity_dir.path().join("trust/peers.json").exists());
         assert!(identity_dir.path().join("backup/metadata.json").exists());
+        assert!(identity_dir.path().join("devices/join-requests.json").exists());
     }
 
     #[test]
@@ -435,5 +569,39 @@ mod tests {
             identity_dir.read_owner_did().unwrap(),
             created.metadata.owner_did
         );
+    }
+
+    #[test]
+    fn runtime_identity_loads_and_validates_credentials() {
+        let dir = tempdir().unwrap();
+        let identity_dir = IdentityDirectory::new(dir.path().join("identity"));
+        let created = identity_dir.initialize("main-device", &[]).unwrap();
+
+        let runtime = identity_dir.load_runtime_identity().unwrap();
+        assert_eq!(runtime.owner_did(), created.metadata.owner_did);
+        assert_eq!(runtime.device_did(), created.active_device.device_did);
+        assert_ne!(runtime.derive_storage_key(), runtime.derive_session_key("peer-a"));
+    }
+
+    #[test]
+    fn join_requests_and_rotation_records_are_persisted() {
+        let dir = tempdir().unwrap();
+        let identity_dir = IdentityDirectory::new(dir.path().join("identity"));
+        identity_dir.initialize("main-device", &[]).unwrap();
+
+        let request = identity_dir.record_join_request("tablet").unwrap();
+        identity_dir
+            .append_rotation_record(RotationRecord {
+                event_id: "rotate-1".into(),
+                kind: RotationKind::MultiDeviceJoin,
+                target_device_slug: Some(request.device_slug.clone()),
+                status: RotationStatus::Planned,
+                note: Some("Approve tablet join".into()),
+                recorded_at: request.requested_at,
+            })
+            .unwrap();
+
+        assert_eq!(identity_dir.list_join_requests().unwrap().len(), 1);
+        assert_eq!(identity_dir.list_rotation_history().unwrap().len(), 1);
     }
 }

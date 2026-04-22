@@ -17,6 +17,7 @@ pub mod auth;
 pub mod credentials;
 pub mod did;
 pub mod keys;
+pub mod runtime;
 pub mod storage;
 
 /// Errors from identity operations.

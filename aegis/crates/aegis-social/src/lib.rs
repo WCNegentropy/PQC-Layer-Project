@@ -37,6 +37,14 @@ pub enum SocialError {
     #[error("federation error: {0}")]
     FederationError(String),
 
+    /// Identity bootstrap/runtime loading error.
+    #[error("identity bootstrap error: {0}")]
+    IdentityBootstrap(String),
+
+    /// Vault bootstrap/runtime loading error.
+    #[error("vault bootstrap error: {0}")]
+    VaultBootstrap(String),
+
     /// Private-node runtime state is inconsistent.
     #[error("invalid node state: {0}")]
     InvalidNodeState(String),

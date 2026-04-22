@@ -439,7 +439,8 @@ fn run_vault_init(
     let master_key = aegis_vault::store::VaultStore::generate_master_key();
     let vault = aegis_vault::store::VaultStore::init(&vault_path, &master_key)
         .map_err(|err| err.to_string())?;
-    write_secure_file(&vault_path.join(".aegis/keys/master.key"), &master_key)?;
+    aegis_vault::store::VaultStore::write_master_key_file(&vault_path, &master_key)
+        .map_err(|err| err.to_string())?;
     let created = vault
         .initialize_social_layout(&owner_did)
         .map_err(|err| err.to_string())?;

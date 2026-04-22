@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use aegis_identity::runtime::{RuntimeIdentity, SignedNodeAdvertisement};
+use aegis_identity::storage::{IdentityDirectory, KnownPeerRecord};
+use aegis_vault::store::{VaultStore, VaultUnlockMetadata};
 use serde::{Deserialize, Serialize};
 
 use crate::SocialError;
@@ -52,6 +55,24 @@ pub struct PrivateNodeState {
     pub active_connections: Vec<ActiveConnection>,
     #[serde(default)]
     pub feature_flags: BTreeMap<String, bool>,
+}
+
+pub struct BootstrappedPrivateNode {
+    pub runtime_identity: RuntimeIdentity,
+    pub vault: VaultStore,
+    pub state: PrivateNodeState,
+    pub advertisement: SignedNodeAdvertisement,
+    pub unlock_metadata: VaultUnlockMetadata,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct RuntimeSettings {
+    pub schema_version: String,
+    pub owner_did: String,
+    #[serde(default)]
+    pub feature_flags: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub active_connections: Vec<String>,
 }
 
 impl PrivateNodeState {
@@ -105,6 +126,76 @@ impl PrivateNodeState {
         );
     }
 
+    pub fn bootstrap(
+        identity_dir: impl AsRef<Path>,
+        vault_dir: impl AsRef<Path>,
+    ) -> Result<BootstrappedPrivateNode, SocialError> {
+        let identity_dir = identity_dir.as_ref().to_path_buf();
+        let vault_dir = vault_dir.as_ref().to_path_buf();
+
+        let identity_store = IdentityDirectory::new(&identity_dir);
+        let runtime_identity = identity_store
+            .load_runtime_identity()
+            .map_err(|err| SocialError::IdentityBootstrap(err.to_string()))?;
+        let known_peers = identity_store
+            .list_known_peers()
+            .map_err(|err| SocialError::IdentityBootstrap(err.to_string()))?;
+        let unlock_metadata = VaultStore::load_unlock_metadata(&vault_dir)
+            .map_err(|err| SocialError::VaultBootstrap(err.to_string()))?;
+        let vault = VaultStore::open_with_file_key(&vault_dir)
+            .map_err(|err| SocialError::VaultBootstrap(err.to_string()))?;
+        let runtime_settings: RuntimeSettings = vault
+            .read_json("runtime/settings.json")
+            .map_err(|err| SocialError::VaultBootstrap(err.to_string()))?;
+
+        if runtime_settings.owner_did != runtime_identity.owner_did() {
+            return Err(SocialError::InvalidNodeState(
+                "runtime settings owner DID does not match identity".into(),
+            ));
+        }
+
+        let mut state = PrivateNodeState::new(
+            runtime_identity.owner_did(),
+            &identity_dir,
+            &vault_dir,
+        );
+        for endpoint in runtime_identity.service_endpoints() {
+            state.add_endpoint(endpoint.endpoint.clone());
+        }
+        for peer in known_peers {
+            state.set_peer_trust(
+                peer.did,
+                PeerTrustState::from(peer.trust_state),
+                peer.pinned_endpoints,
+            );
+        }
+        for (flag, enabled) in runtime_settings.feature_flags {
+            state.set_feature_flag(flag, enabled);
+        }
+
+        let advertisement = runtime_identity
+            .sign_node_advertisement(
+                default_protocol_capabilities(),
+                env!("CARGO_PKG_VERSION"),
+                Some("vault://social/space/index.html".into()),
+                None,
+            )
+            .map_err(|err| SocialError::IdentityBootstrap(err.to_string()))?;
+
+        state.validate()?;
+        advertisement
+            .verify()
+            .map_err(|err| SocialError::IdentityBootstrap(err.to_string()))?;
+
+        Ok(BootstrappedPrivateNode {
+            runtime_identity,
+            vault,
+            state,
+            advertisement,
+            unlock_metadata,
+        })
+    }
+
     pub fn record_signed_peer_record(
         &mut self,
         did: &str,
@@ -156,6 +247,16 @@ impl PrivateNodeState {
     }
 }
 
+impl From<aegis_identity::storage::PeerTrustState> for PeerTrustState {
+    fn from(value: aegis_identity::storage::PeerTrustState) -> Self {
+        match value {
+            aegis_identity::storage::PeerTrustState::Trusted => Self::Trusted,
+            aegis_identity::storage::PeerTrustState::Pending => Self::Pending,
+            aegis_identity::storage::PeerTrustState::Blocked => Self::Blocked,
+        }
+    }
+}
+
 fn now_secs() -> Result<u64, std::time::SystemTimeError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -172,6 +273,7 @@ fn default_protocol_capabilities() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn node_state_tracks_peer_trust_and_connections() {
@@ -210,5 +312,32 @@ mod tests {
             state.validate(),
             Err(SocialError::InvalidNodeState(_))
         ));
+    }
+
+    #[test]
+    fn bootstrap_loads_identity_and_vault_state() {
+        let temp = tempdir().unwrap();
+        let identity_dir = temp.path().join("identity");
+        let vault_dir = temp.path().join("vault");
+
+        let identity_store = IdentityDirectory::new(&identity_dir);
+        let owner = identity_store.initialize("main-device", &[]).unwrap();
+
+        let master_key = VaultStore::generate_master_key();
+        let vault = VaultStore::init(&vault_dir, &master_key).unwrap();
+        VaultStore::write_master_key_file(&vault_dir, &master_key).unwrap();
+        vault.initialize_social_layout(&owner.metadata.owner_did).unwrap();
+
+        let bootstrapped = PrivateNodeState::bootstrap(&identity_dir, &vault_dir).unwrap();
+        assert_eq!(bootstrapped.state.owner_did, owner.metadata.owner_did);
+        assert_eq!(
+            bootstrapped.unlock_metadata.mode,
+            aegis_vault::store::VaultUnlockMode::FileKey
+        );
+        assert_eq!(
+            bootstrapped.advertisement.advertisement.owner_did,
+            bootstrapped.runtime_identity.owner_did()
+        );
+        bootstrapped.state.validate().unwrap();
     }
 }
