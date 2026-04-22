@@ -35,6 +35,10 @@ pub enum VaultError {
     #[error("vault crypto error: {0}")]
     CryptoError(String),
 
+    /// Serialization or deserialization error.
+    #[error("vault serialization error: {0}")]
+    Serialization(String),
+
     /// Sync conflict that could not be automatically resolved.
     #[error("sync conflict: {0}")]
     SyncConflict(String),

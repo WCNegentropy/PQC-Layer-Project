@@ -191,7 +191,7 @@ impl VaultStore {
                 created_at: prior_entry
                     .as_ref()
                     .map(|entry| entry.created_at)
-                    .filter(|value| *value != 0)
+                    .filter(|value| is_initialized_timestamp(*value))
                     .unwrap_or(now),
                 updated_at: now,
                 plaintext_len: plaintext.len(),
@@ -267,7 +267,10 @@ impl VaultStore {
         let manifest = self.load_manifest()?;
         let mut children = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
-        for path in manifest.entries.keys() {
+        for (path, entry) in &manifest.entries {
+            if entry.tombstone {
+                continue;
+            }
             if let Some(child) = immediate_child(path, prefix.as_deref()) {
                 if seen.insert(child.clone()) {
                     children.push(child);
@@ -283,7 +286,7 @@ impl VaultStore {
         logical_prefix: Option<&str>,
     ) -> Result<Vec<VaultEntryMetadata>, VaultError> {
         let prefix = match logical_prefix {
-            Some(prefix) => Some(normalize_directory_prefix(prefix)?.unwrap_or_default()),
+            Some(prefix) => normalize_directory_prefix(prefix)?,
             None => None,
         };
         let manifest = self.load_manifest()?;
@@ -315,14 +318,14 @@ impl VaultStore {
         value: &T,
     ) -> Result<(), VaultError> {
         let bytes = serde_json::to_vec_pretty(value)
-            .map_err(|err| VaultError::CryptoError(err.to_string()))?;
+            .map_err(|err| VaultError::Serialization(err.to_string()))?;
         self.write(logical_path, &bytes)
     }
 
     /// Read a JSON document from the vault and deserialize it.
     pub fn read_json<T: DeserializeOwned>(&self, logical_path: &str) -> Result<T, VaultError> {
         let bytes = self.read(logical_path)?;
-        serde_json::from_slice(&bytes).map_err(|err| VaultError::CryptoError(err.to_string()))
+        serde_json::from_slice(&bytes).map_err(|err| VaultError::Serialization(err.to_string()))
     }
 
     /// Bootstrap the private-node social layout defined by the project spec.
@@ -576,6 +579,10 @@ fn matches_prefix(path: &str, prefix: Option<&str>) -> bool {
 fn content_hash(bytes: &[u8]) -> String {
     let digest = Sha3_256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn is_initialized_timestamp(value: u64) -> bool {
+    value != 0
 }
 
 fn infer_media_type(logical_path: &str) -> Option<String> {

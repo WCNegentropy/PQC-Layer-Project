@@ -66,11 +66,7 @@ impl PrivateNodeState {
             vault_dir: vault_dir.as_ref().to_path_buf(),
             local_record: LocalNodeRecord {
                 endpoints: Vec::new(),
-                protocol_capabilities: vec![
-                    "vault://".into(),
-                    "node://".into(),
-                    "sanctuary://".into(),
-                ],
+                protocol_capabilities: default_protocol_capabilities(),
                 runtime_version: env!("CARGO_PKG_VERSION").into(),
             },
             peer_trust_store: BTreeMap::new(),
@@ -164,6 +160,13 @@ fn now_secs() -> Result<u64, std::time::SystemTimeError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
+}
+
+/// Default protocol capability surface for the planned browser/runtime shell:
+/// `vault://` for local vault-backed content, `node://` for direct private-node
+/// visits, and `sanctuary://` for optional shared-node spaces.
+fn default_protocol_capabilities() -> Vec<String> {
+    vec!["vault://".into(), "node://".into(), "sanctuary://".into()]
 }
 
 #[cfg(test)]

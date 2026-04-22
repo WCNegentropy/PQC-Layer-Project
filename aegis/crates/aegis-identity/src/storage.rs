@@ -24,6 +24,7 @@ const TRUST_STORE_FILE: &str = "trust/peers.json";
 const DISCOVERY_FILE: &str = "discovery/endpoints.json";
 const ROTATION_HISTORY_FILE: &str = "rotation/history.json";
 const BACKUP_METADATA_FILE: &str = "backup/metadata.json";
+const LEGACY_CONTRACT_VERSION: u32 = 0;
 const LEGACY_DID_FILE: &str = "did.txt";
 const LEGACY_DEVICE_NAME_FILE: &str = "device-name.txt";
 const LEGACY_DID_DOCUMENT_FILE: &str = "did-document.json";
@@ -279,7 +280,7 @@ impl IdentityDirectory {
         let device_slug = slugify_device_name(&device_name);
         Ok(StoredIdentity {
             metadata: IdentityDirectoryMetadata {
-                contract_version: 0,
+                contract_version: LEGACY_CONTRACT_VERSION,
                 owner_did: owner_did.clone(),
                 active_device_slug: device_slug.clone(),
                 created_at: 0,
@@ -374,11 +375,11 @@ fn slugify_device_name(name: &str) -> String {
             last_was_dash = true;
         }
     }
-    let slug = slug.trim_matches('-');
-    if slug.is_empty() {
+    let trimmed_slug = slug.trim_matches('-');
+    if trimmed_slug.is_empty() {
         "default-device".into()
     } else {
-        slug.into()
+        trimmed_slug.into()
     }
 }
 
