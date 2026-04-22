@@ -121,7 +121,11 @@ dependencies = [
 name = "aegis-social"
 version = "0.1.0"
 dependencies = [
+ "aegis-identity",
+ "aegis-vault",
  "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
 ]
 

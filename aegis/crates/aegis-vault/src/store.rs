@@ -266,7 +266,9 @@ impl VaultStore {
     pub fn read_master_key_file(root: impl AsRef<Path>) -> Result<[u8; AEAD_KEY_SIZE], VaultError> {
         let metadata = Self::load_unlock_metadata(root.as_ref())?;
         let bytes = std::fs::read(root.as_ref().join(metadata.key_file))?;
-        bytes.try_into().map_err(|_| VaultError::Serialization("invalid master key length".into()))
+        bytes
+            .try_into()
+            .map_err(|_| VaultError::Serialization("invalid master key length".into()))
     }
 
     /// Write an encrypted file to the vault.
@@ -488,7 +490,8 @@ impl VaultStore {
             let ciphertext = std::fs::read(&blob_path)?;
             let key = self.derive_file_key(logical_path)?;
             let cipher = AeadCipher::new(&key);
-            let plaintext = match cipher.decrypt(&entry.nonce, &ciphertext, logical_path.as_bytes()) {
+            let plaintext = match cipher.decrypt(&entry.nonce, &ciphertext, logical_path.as_bytes())
+            {
                 Ok(bytes) => bytes.to_vec(),
                 Err(err) => {
                     report.issues.push(IntegrityIssue {
@@ -1005,7 +1008,9 @@ mod tests {
         let vault = VaultStore::init(dir.path(), &master_key).unwrap();
         VaultStore::write_master_key_file(dir.path(), &master_key).unwrap();
 
-        vault.write("documents/secret.txt", b"open via unlock metadata").unwrap();
+        vault
+            .write("documents/secret.txt", b"open via unlock metadata")
+            .unwrap();
 
         let reopened = VaultStore::open_with_file_key(dir.path()).unwrap();
         let unlock_metadata = VaultStore::load_unlock_metadata(dir.path()).unwrap();
@@ -1060,7 +1065,10 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(repair.tombstoned_entries, vec!["documents/hello.txt".to_string()]);
+        assert_eq!(
+            repair.tombstoned_entries,
+            vec!["documents/hello.txt".to_string()]
+        );
         assert!(matches!(
             vault.read("documents/hello.txt"),
             Err(VaultError::NotFound(_))

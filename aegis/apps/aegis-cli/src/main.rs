@@ -4,7 +4,7 @@
 //! Provides tunnel commands plus identity and vault bootstrap flows.
 
 use clap::{Parser, Subcommand};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
@@ -457,18 +457,4 @@ fn read_owner_did(identity_dir: &str) -> Result<String, String> {
     aegis_identity::storage::IdentityDirectory::new(identity_dir)
         .read_owner_did()
         .map_err(|err| err.to_string())
-}
-
-fn write_secure_file(path: &Path, contents: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
-    std::fs::write(path, contents).map_err(|err| err.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|err| err.to_string())?;
-    }
-    Ok(())
 }

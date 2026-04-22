@@ -553,7 +553,10 @@ mod tests {
             .exists());
         assert!(identity_dir.path().join("trust/peers.json").exists());
         assert!(identity_dir.path().join("backup/metadata.json").exists());
-        assert!(identity_dir.path().join("devices/join-requests.json").exists());
+        assert!(identity_dir
+            .path()
+            .join("devices/join-requests.json")
+            .exists());
     }
 
     #[test]
@@ -580,7 +583,10 @@ mod tests {
         let runtime = identity_dir.load_runtime_identity().unwrap();
         assert_eq!(runtime.owner_did(), created.metadata.owner_did);
         assert_eq!(runtime.device_did(), created.active_device.device_did);
-        assert_ne!(runtime.derive_storage_key(), runtime.derive_session_key("peer-a"));
+        assert_ne!(
+            runtime.derive_storage_key(),
+            runtime.derive_session_key("peer-a")
+        );
     }
 
     #[test]

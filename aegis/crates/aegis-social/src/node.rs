@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aegis_identity::runtime::{RuntimeIdentity, SignedNodeAdvertisement};
-use aegis_identity::storage::{IdentityDirectory, KnownPeerRecord};
+use aegis_identity::storage::IdentityDirectory;
 use aegis_vault::store::{VaultStore, VaultUnlockMetadata};
 use serde::{Deserialize, Serialize};
 
@@ -154,11 +154,8 @@ impl PrivateNodeState {
             ));
         }
 
-        let mut state = PrivateNodeState::new(
-            runtime_identity.owner_did(),
-            &identity_dir,
-            &vault_dir,
-        );
+        let mut state =
+            PrivateNodeState::new(runtime_identity.owner_did(), &identity_dir, &vault_dir);
         for endpoint in runtime_identity.service_endpoints() {
             state.add_endpoint(endpoint.endpoint.clone());
         }
@@ -326,7 +323,9 @@ mod tests {
         let master_key = VaultStore::generate_master_key();
         let vault = VaultStore::init(&vault_dir, &master_key).unwrap();
         VaultStore::write_master_key_file(&vault_dir, &master_key).unwrap();
-        vault.initialize_social_layout(&owner.metadata.owner_did).unwrap();
+        vault
+            .initialize_social_layout(&owner.metadata.owner_did)
+            .unwrap();
 
         let bootstrapped = PrivateNodeState::bootstrap(&identity_dir, &vault_dir).unwrap();
         assert_eq!(bootstrapped.state.owner_did, owner.metadata.owner_did);

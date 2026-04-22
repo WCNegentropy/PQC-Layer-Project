@@ -218,7 +218,8 @@ mod tests {
 
     fn sample_runtime_identity() -> RuntimeIdentity {
         let root_signing_keypair = SigningKeypair::generate();
-        let owner_did = Did::from_signing_public_key_bytes(&root_signing_keypair.public_key_bytes());
+        let owner_did =
+            Did::from_signing_public_key_bytes(&root_signing_keypair.public_key_bytes());
         let (root_exchange_public_key, root_exchange_secret_key) = AegisCrypto::keygen();
 
         let active_device_signing_keypair = SigningKeypair::generate();
@@ -289,6 +290,9 @@ mod tests {
     #[test]
     fn runtime_identity_derives_distinct_session_and_storage_keys() {
         let runtime = sample_runtime_identity();
-        assert_ne!(runtime.derive_storage_key(), runtime.derive_session_key("peer-a"));
+        assert_ne!(
+            runtime.derive_storage_key(),
+            runtime.derive_session_key("peer-a")
+        );
     }
 }
