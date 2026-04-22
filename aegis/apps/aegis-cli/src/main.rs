@@ -372,16 +372,6 @@ fn run_identity_new(
     device_name: &str,
     endpoints: &[String],
 ) -> Result<(), String> {
-    let identity_path = PathBuf::from(identity_dir);
-    if identity_path.join("did.txt").exists() {
-        return Err(format!(
-            "identity already exists at {}",
-            identity_path.display()
-        ));
-    }
-    std::fs::create_dir_all(&identity_path).map_err(|err| err.to_string())?;
-
-    let root = aegis_identity::keys::RootIdentity::generate();
     let services = if endpoints.is_empty() {
         vec![aegis_identity::did::ServiceEndpoint {
             id: "#primary-node".into(),
@@ -399,93 +389,40 @@ fn run_identity_new(
             })
             .collect()
     };
-    let document = root.document(services);
-    let device = root
-        .issue_device(device_name)
+    let identity_path = PathBuf::from(identity_dir);
+    let identity_store = aegis_identity::storage::IdentityDirectory::new(&identity_path);
+    let stored = identity_store
+        .initialize(device_name, &services)
         .map_err(|err| err.to_string())?;
-    let did = root.did().as_str().to_string();
-
-    write_secure_file(
-        &identity_path.join("root-signing.key"),
-        &root.signing_keypair().secret_key_bytes(),
-    )?;
-    std::fs::write(
-        identity_path.join("root-signing.pub"),
-        root.signing_keypair().public_key_bytes(),
-    )
-    .map_err(|err| err.to_string())?;
-    write_secure_file(
-        &identity_path.join("root-exchange.key"),
-        &root.exchange_secret_key().to_bytes(),
-    )?;
-    std::fs::write(
-        identity_path.join("root-exchange.pub"),
-        root.exchange_public_key().to_bytes(),
-    )
-    .map_err(|err| err.to_string())?;
-
-    write_secure_file(
-        &identity_path.join("device-signing.key"),
-        &device.signing_keypair().secret_key_bytes(),
-    )?;
-    std::fs::write(
-        identity_path.join("device-signing.pub"),
-        device.signing_keypair().public_key_bytes(),
-    )
-    .map_err(|err| err.to_string())?;
-    write_secure_file(
-        &identity_path.join("device-exchange.key"),
-        &device.exchange_secret_key().to_bytes(),
-    )?;
-    std::fs::write(
-        identity_path.join("device-exchange.pub"),
-        device.exchange_public_key().to_bytes(),
-    )
-    .map_err(|err| err.to_string())?;
-    std::fs::write(identity_path.join("did.txt"), &did).map_err(|err| err.to_string())?;
-    std::fs::write(identity_path.join("device-name.txt"), device.device_name())
-        .map_err(|err| err.to_string())?;
-    std::fs::write(
-        identity_path.join("did-document.json"),
-        document.to_pretty_json().map_err(|err| err.to_string())?,
-    )
-    .map_err(|err| err.to_string())?;
-    std::fs::write(
-        identity_path.join("device-credential.json"),
-        serde_json::to_string_pretty(device.attestation()).map_err(|err| err.to_string())?,
-    )
-    .map_err(|err| err.to_string())?;
 
     println!("🪪 Created local Aegis identity");
-    println!("   DID:        {did}");
+    println!("   DID:        {}", stored.metadata.owner_did);
     println!("   Identity:   {}", identity_path.display());
-    println!("   Device DID: {}", device.device_did());
-    println!("   ✅ DID document and device credential written");
+    println!("   Device DID: {}", stored.active_device.device_did);
+    println!(
+        "   ✅ Contract v{} DID document and device credential written",
+        stored.metadata.contract_version
+    );
     Ok(())
 }
 
 fn run_identity_show(identity_dir: &str) -> Result<(), String> {
-    let identity_path = PathBuf::from(identity_dir);
-    let did =
-        std::fs::read_to_string(identity_path.join("did.txt")).map_err(|err| err.to_string())?;
-    let document_json = std::fs::read_to_string(identity_path.join("did-document.json"))
+    let identity_store = aegis_identity::storage::IdentityDirectory::new(identity_dir);
+    let stored = identity_store.load().map_err(|err| err.to_string())?;
+    stored
+        .device_credential
+        .verify()
         .map_err(|err| err.to_string())?;
-    let document: aegis_identity::did::DidDocument =
-        serde_json::from_str(&document_json).map_err(|err| err.to_string())?;
-    let credential_json = std::fs::read_to_string(identity_path.join("device-credential.json"))
-        .map_err(|err| err.to_string())?;
-    let credential: aegis_identity::credentials::Credential =
-        serde_json::from_str(&credential_json).map_err(|err| err.to_string())?;
-    credential.verify().map_err(|err| err.to_string())?;
 
     println!("🪪 Aegis Identity");
-    println!("   DID:        {}", did.trim());
-    println!("   Services:   {}", document.service.len());
-    for service in &document.service {
+    println!("   DID:        {}", stored.metadata.owner_did);
+    println!("   Services:   {}", stored.did_document.service.len());
+    for service in &stored.did_document.service {
         println!("   - {} → {}", service.service_type, service.endpoint);
     }
+    println!("   Device:     {}", stored.active_device.name);
     println!("   Device VC:  verified");
-    println!("   Subject:    {}", credential.subject);
+    println!("   Subject:    {}", stored.device_credential.subject);
     Ok(())
 }
 
@@ -516,8 +453,8 @@ fn run_vault_init(
 }
 
 fn read_owner_did(identity_dir: &str) -> Result<String, String> {
-    std::fs::read_to_string(PathBuf::from(identity_dir).join("did.txt"))
-        .map(|value| value.trim().to_string())
+    aegis_identity::storage::IdentityDirectory::new(identity_dir)
+        .read_owner_did()
         .map_err(|err| err.to_string())
 }
 

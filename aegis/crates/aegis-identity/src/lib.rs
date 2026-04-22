@@ -17,6 +17,7 @@ pub mod auth;
 pub mod credentials;
 pub mod did;
 pub mod keys;
+pub mod storage;
 
 /// Errors from identity operations.
 #[derive(Debug, thiserror::Error)]
@@ -40,6 +41,14 @@ pub enum IdentityError {
     /// Serialization or deserialization error.
     #[error("serialization error: {0}")]
     Serialization(String),
+
+    /// I/O error while reading or writing identity state.
+    #[error("identity I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// The identity directory is missing required state.
+    #[error("invalid identity state: {0}")]
+    InvalidState(String),
 }
 
 impl From<aegis_crypto::CryptoError> for IdentityError {

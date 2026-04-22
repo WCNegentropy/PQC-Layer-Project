@@ -8,4 +8,5 @@ repository.workspace = true
 description = "Social fabric (Layer 7) — PQ messaging, groups, federation"
 
 [dependencies]
+serde = { workspace = true }
 thiserror = "1.0"

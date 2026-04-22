@@ -300,7 +300,7 @@ Instead, development should proceed in this strict order:
 
 ## Tasks
 
-### 0.1 Documentation alignment
+### 0.1 Documentation alignment — COMPLETED ✅
 Update and unify:
 - root `README.md`
 - `aegis/README.md`
@@ -313,7 +313,7 @@ Make them all explicitly distinguish:
 - **placeholder**
 - **planned**
 
-### 0.2 Introduce milestone map in repo docs
+### 0.2 Introduce milestone map in repo docs — COMPLETED ✅
 Add a top-level roadmap section like:
 - Phase 1 complete: crypto + transport + sanctuary
 - Phase 2A: identity/vault hardening
@@ -321,7 +321,7 @@ Add a top-level roadmap section like:
 - Phase 2C: sync + messaging + shared nodes
 - Phase 2D: federation + packaging + AegisOS image
 
-### 0.3 Define canonical “runtime topology”
+### 0.3 Define canonical “runtime topology” — COMPLETED ✅
 Create a single architecture section that identifies:
 - Aegis Desktop = Browser/runtime shell
 - Aegis CLI = ops/bootstrap/debug tool
@@ -367,7 +367,7 @@ Without that, the desktop app is only a shell around placeholders.
 
 ### Required work
 
-#### 1.1.1 Define persistent identity directory contract
+#### 1.1.1 Define persistent identity directory contract — COMPLETED ✅
 Standardize on-disk layout for:
 - root DID doc
 - root signing material
@@ -401,7 +401,7 @@ Implement design and scaffolding for:
 
 Even if some are MVP-limited, the storage and API shape should be designed now.
 
-#### 1.1.4 Peer trust and trust store
+#### 1.1.4 Peer trust and trust store — COMPLETED ✅
 Add structures for:
 - known peer DIDs
 - trust state
@@ -429,7 +429,7 @@ Use DID/service records as the basis for:
 
 ### Required work
 
-#### 1.2.1 Formalize logical vault schema
+#### 1.2.1 Formalize logical vault schema — COMPLETED ✅
 Expand the current social layout into a versioned schema covering:
 - `social/space/`
 - `social/character/`
@@ -443,7 +443,7 @@ Expand the current social layout into a versioned schema covering:
 - `runtime/`
 - `cache/`
 
-#### 1.2.2 Manifest evolution
+#### 1.2.2 Manifest evolution — COMPLETED ✅
 Current manifest is enough for minimal storage, but future runtime needs:
 - content hash
 - media type
@@ -454,7 +454,7 @@ Current manifest is enough for minimal storage, but future runtime needs:
 - author/device metadata
 - optional capability labels
 
-#### 1.2.3 Write/read API expansion
+#### 1.2.3 Write/read API expansion — COMPLETED ✅
 Add higher-level vault APIs for:
 - JSON document read/write
 - asset streaming
@@ -510,7 +510,7 @@ Do not block Phase 1 on all platforms. Ship Linux first.
 #### 1.3.4 Browser/runtime integration goal
 The FUSE layer should make it possible for the browser/editor/runtime to treat selected vault content as normal files while preserving encrypted backing storage.
 
-## 1.4 Local node state model
+## 1.4 Local node state model — COMPLETED ✅
 
 Introduce a new internal concept:
 - **Private Node State**

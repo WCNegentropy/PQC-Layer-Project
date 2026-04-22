@@ -16,6 +16,7 @@
 pub mod federation;
 pub mod groups;
 pub mod messaging;
+pub mod node;
 
 /// Errors from social operations.
 #[derive(Debug, thiserror::Error)]
@@ -35,6 +36,10 @@ pub enum SocialError {
     /// Federation protocol error.
     #[error("federation error: {0}")]
     FederationError(String),
+
+    /// Private-node runtime state is inconsistent.
+    #[error("invalid node state: {0}")]
+    InvalidNodeState(String),
 }
 
 #[cfg(test)]
