@@ -314,8 +314,8 @@ impl VaultStore {
         logical_path: &str,
         value: &T,
     ) -> Result<(), VaultError> {
-        let bytes =
-            serde_json::to_vec_pretty(value).map_err(|err| VaultError::CryptoError(err.to_string()))?;
+        let bytes = serde_json::to_vec_pretty(value)
+            .map_err(|err| VaultError::CryptoError(err.to_string()))?;
         self.write(logical_path, &bytes)
     }
 
@@ -580,17 +580,19 @@ fn content_hash(bytes: &[u8]) -> String {
 
 fn infer_media_type(logical_path: &str) -> Option<String> {
     let extension = Path::new(logical_path).extension()?.to_string_lossy();
-    Some(match extension.as_ref() {
-        "html" => "text/html",
-        "css" => "text/css",
-        "json" => "application/json",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "svg" => "image/svg+xml",
-        "txt" => "text/plain",
-        _ => "application/octet-stream",
-    }
-    .to_string())
+    Some(
+        match extension.as_ref() {
+            "html" => "text/html",
+            "css" => "text/css",
+            "json" => "application/json",
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "svg" => "image/svg+xml",
+            "txt" => "text/plain",
+            _ => "application/octet-stream",
+        }
+        .to_string(),
+    )
 }
 
 fn infer_schema(logical_path: &str) -> VaultDocumentSchema {

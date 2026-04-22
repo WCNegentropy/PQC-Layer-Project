@@ -77,7 +77,7 @@ pub struct BackupMetadata {
     pub updated_at: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StoredIdentity {
     pub metadata: IdentityDirectoryMetadata,
     pub active_device: DeviceMetadata,
@@ -147,9 +147,25 @@ impl IdentityDirectory {
         let device_dir = self.device_dir(&device_slug);
 
         std::fs::create_dir_all(&device_dir)?;
-        write_secure_file(&self.root.join(OWNER_DID_FILE), root_identity.did().as_str().as_bytes())?;
+        write_secure_file(
+            &self.root.join(OWNER_DID_FILE),
+            root_identity.did().as_str().as_bytes(),
+        )?;
         write_json(&self.metadata_path(), &metadata)?;
         write_json(&self.did_document_path(), &did_document)?;
+        write_secure_file(
+            &self.root.join(LEGACY_DID_FILE),
+            root_identity.did().as_str().as_bytes(),
+        )?;
+        std::fs::write(
+            self.root.join(LEGACY_DEVICE_NAME_FILE),
+            device.device_name(),
+        )?;
+        write_json(&self.root.join(LEGACY_DID_DOCUMENT_FILE), &did_document)?;
+        write_json(
+            &self.root.join(LEGACY_DEVICE_CREDENTIAL_FILE),
+            device.attestation(),
+        )?;
         write_json(&self.trust_store_path(), &Vec::<KnownPeerRecord>::new())?;
         write_json(&self.discovery_path(), &did_document.service)?;
         write_json(&self.rotation_history_path(), &Vec::<RotationRecord>::new())?;
@@ -210,11 +226,17 @@ impl IdentityDirectory {
     pub fn load(&self) -> Result<StoredIdentity, IdentityError> {
         if self.metadata_path().exists() {
             let metadata: IdentityDirectoryMetadata = read_json(&self.metadata_path())?;
-            let active_device: DeviceMetadata =
-                read_json(&self.device_dir(&metadata.active_device_slug).join("device.json"))?;
+            let active_device: DeviceMetadata = read_json(
+                &self
+                    .device_dir(&metadata.active_device_slug)
+                    .join("device.json"),
+            )?;
             let did_document: DidDocument = read_json(&self.did_document_path())?;
-            let device_credential: Credential =
-                read_json(&self.device_dir(&metadata.active_device_slug).join("attestation.json"))?;
+            let device_credential: Credential = read_json(
+                &self
+                    .device_dir(&metadata.active_device_slug)
+                    .join("attestation.json"),
+            )?;
 
             return Ok(StoredIdentity {
                 metadata,
@@ -229,7 +251,9 @@ impl IdentityDirectory {
 
     pub fn read_owner_did(&self) -> Result<String, IdentityError> {
         if self.owner_did_path().exists() {
-            return Ok(std::fs::read_to_string(self.owner_did_path())?.trim().to_string());
+            return Ok(std::fs::read_to_string(self.owner_did_path())?
+                .trim()
+                .to_string());
         }
         if self.legacy_did_path().exists() {
             return Ok(std::fs::read_to_string(self.legacy_did_path())?
@@ -314,8 +338,8 @@ impl IdentityDirectory {
 }
 
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), IdentityError> {
-    let contents =
-        serde_json::to_vec_pretty(value).map_err(|err| IdentityError::Serialization(err.to_string()))?;
+    let contents = serde_json::to_vec_pretty(value)
+        .map_err(|err| IdentityError::Serialization(err.to_string()))?;
     std::fs::write(path, contents)?;
     Ok(())
 }
@@ -389,7 +413,10 @@ mod tests {
         assert_eq!(stored.metadata.contract_version, CONTRACT_VERSION);
         assert_eq!(stored.active_device.slug, "laptop-01");
         assert!(identity_dir.path().join("root/signing.key").exists());
-        assert!(identity_dir.path().join("devices/laptop-01/attestation.json").exists());
+        assert!(identity_dir
+            .path()
+            .join("devices/laptop-01/attestation.json")
+            .exists());
         assert!(identity_dir.path().join("trust/peers.json").exists());
         assert!(identity_dir.path().join("backup/metadata.json").exists());
     }

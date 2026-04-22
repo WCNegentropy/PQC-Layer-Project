@@ -123,11 +123,7 @@ impl PrivateNodeState {
         Ok(())
     }
 
-    pub fn record_connection(
-        &mut self,
-        peer_did: impl Into<String>,
-        transport: impl Into<String>,
-    ) {
+    pub fn record_connection(&mut self, peer_did: impl Into<String>, transport: impl Into<String>) {
         self.active_connections.push(ActiveConnection {
             peer_did: peer_did.into(),
             transport: transport.into(),
@@ -176,11 +172,8 @@ mod tests {
 
     #[test]
     fn node_state_tracks_peer_trust_and_connections() {
-        let mut state = PrivateNodeState::new(
-            "did:aegis:owner",
-            "/tmp/aegis-identity",
-            "/tmp/aegis-vault",
-        );
+        let mut state =
+            PrivateNodeState::new("did:aegis:owner", "/tmp/aegis-identity", "/tmp/aegis-vault");
         state.add_endpoint("udp://127.0.0.1:51820");
         state.set_feature_flag("browser-shell", true);
         state.set_peer_trust(
@@ -197,18 +190,17 @@ mod tests {
         assert!(state.feature_flags["browser-shell"]);
         assert_eq!(state.active_connections.len(), 1);
         assert_eq!(
-            state.peer_trust_store["did:aegis:peer"].last_seen_signed_record.as_deref(),
+            state.peer_trust_store["did:aegis:peer"]
+                .last_seen_signed_record
+                .as_deref(),
             Some("signed-node-record")
         );
     }
 
     #[test]
     fn validate_rejects_unknown_active_peer() {
-        let mut state = PrivateNodeState::new(
-            "did:aegis:owner",
-            "/tmp/aegis-identity",
-            "/tmp/aegis-vault",
-        );
+        let mut state =
+            PrivateNodeState::new("did:aegis:owner", "/tmp/aegis-identity", "/tmp/aegis-vault");
         state.record_connection("did:aegis:missing", "pqwg");
 
         assert!(matches!(
