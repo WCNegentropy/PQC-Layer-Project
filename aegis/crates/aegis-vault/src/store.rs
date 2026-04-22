@@ -925,15 +925,19 @@ fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), VaultError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let temp_path = path.with_extension(format!(
-        "{}tmp",
-        path.extension()
-            .map(|extension| format!("{}.", extension.to_string_lossy()))
-            .unwrap_or_default()
-    ));
+    let temp_path = sibling_temp_path(path);
     std::fs::write(&temp_path, contents)?;
     std::fs::rename(temp_path, path)?;
     Ok(())
+}
+
+pub(crate) fn sibling_temp_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "aegis.tmp".into());
+    path.with_file_name(format!(".{file_name}.tmp"))
 }
 
 fn collect_files_recursively(path: &Path) -> Result<Vec<PathBuf>, VaultError> {

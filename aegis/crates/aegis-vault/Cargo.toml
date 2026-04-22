@@ -11,6 +11,7 @@ description = "Data sovereignty vault (Layer 5) — encrypted storage, FUSE, syn
 aegis-platform = { path = "../aegis-platform" }
 aegis-crypto = { path = "../aegis-crypto" }
 hkdf = "0.12"
+libc = "0.2"
 rand = "0.8"
 serde = { workspace = true }
 serde_json = { workspace = true }

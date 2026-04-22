@@ -136,6 +136,7 @@ dependencies = [
  "aegis-crypto",
  "aegis-platform",
  "hkdf",
+ "libc",
  "rand",
  "serde",
  "serde_json",

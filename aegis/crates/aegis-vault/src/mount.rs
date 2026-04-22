@@ -18,7 +18,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use crate::store::VaultStore;
+use crate::store::{sibling_temp_path, VaultStore};
 use crate::VaultError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -146,6 +146,16 @@ impl FuseMount {
 }
 
 fn prepare_mount_point(mount_point: &Path, vault_root: &Path) -> Result<(), VaultError> {
+    if mount_point.exists()
+        && std::fs::symlink_metadata(mount_point)?
+            .file_type()
+            .is_symlink()
+    {
+        return Err(VaultError::Mount(format!(
+            "mount point '{}' must not be a symlink",
+            mount_point.display()
+        )));
+    }
     if !mount_point.exists() {
         std::fs::create_dir_all(mount_point)?;
     }
@@ -176,6 +186,19 @@ fn prepare_mount_point(mount_point: &Path, vault_root: &Path) -> Result<(), Vaul
 fn clear_mount_contents(mount_point: &Path) -> Result<(), VaultError> {
     if !mount_point.exists() {
         return Ok(());
+    }
+    let mount_metadata = std::fs::symlink_metadata(mount_point)?;
+    if mount_metadata.file_type().is_symlink() {
+        return Err(VaultError::Mount(format!(
+            "mount point '{}' must not be a symlink",
+            mount_point.display()
+        )));
+    }
+    if !mount_metadata.is_dir() {
+        return Err(VaultError::Mount(format!(
+            "mount point '{}' is not a directory",
+            mount_point.display()
+        )));
     }
     set_dir_permissions(mount_point, MountMode::ReadWrite)?;
 
@@ -212,6 +235,20 @@ fn collect_plaintext_files_inner(
     current: &Path,
     files: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<(), VaultError> {
+    let current_metadata = std::fs::symlink_metadata(current)?;
+    if current_metadata.file_type().is_symlink() {
+        return Err(VaultError::Mount(format!(
+            "mounted directory '{}' must not be a symlink",
+            current.display()
+        )));
+    }
+    if !current_metadata.is_dir() {
+        return Err(VaultError::Mount(format!(
+            "mounted path '{}' is not a directory",
+            current.display()
+        )));
+    }
+
     for entry in std::fs::read_dir(current)? {
         let entry = entry?;
         let path = entry.path();
@@ -235,7 +272,7 @@ fn collect_plaintext_files_inner(
             .map_err(|_| VaultError::Mount("mounted file escaped mount root".into()))?
             .to_string_lossy()
             .replace('\\', "/");
-        files.insert(relative, std::fs::read(path)?);
+        files.insert(relative, read_plaintext_file(&path)?);
     }
 
     Ok(())
@@ -273,12 +310,7 @@ fn atomic_write_plaintext(path: &Path, contents: &[u8]) -> Result<(), VaultError
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let temp_path = path.with_extension(format!(
-        "{}tmp",
-        path.extension()
-            .map(|extension| format!("{}.", extension.to_string_lossy()))
-            .unwrap_or_default()
-    ));
+    let temp_path = sibling_temp_path(path);
     std::fs::write(&temp_path, contents)?;
     std::fs::rename(temp_path, path)?;
     Ok(())
@@ -336,6 +368,47 @@ fn set_dir_permissions(path: &Path, mode: MountMode) -> Result<(), VaultError> {
     }
 
     Ok(())
+}
+
+fn read_plaintext_file(path: &Path) -> Result<Vec<u8>, VaultError> {
+    #[cfg(unix)]
+    {
+        use std::io::Read;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err(VaultError::Mount(format!(
+                "mounted path '{}' is not a regular file",
+                path.display()
+            )));
+        }
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    #[cfg(not(unix))]
+    {
+        let metadata = std::fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(VaultError::Mount(format!(
+                "mounted path '{}' must not be a symlink",
+                path.display()
+            )));
+        }
+        if !metadata.is_file() {
+            return Err(VaultError::Mount(format!(
+                "mounted path '{}' is not a regular file",
+                path.display()
+            )));
+        }
+        std::fs::read(path).map_err(VaultError::from)
+    }
 }
 
 fn make_tree_writable(path: &Path) -> Result<(), VaultError> {
