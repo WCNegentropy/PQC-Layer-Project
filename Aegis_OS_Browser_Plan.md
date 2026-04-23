@@ -1,6 +1,6 @@
 # Aegis OS / Browser / Runtime Expansion Plan
 ## Repo-Based Phased Implementation Plan for `WCNegentropy/PQC-Layer-Project`
-**Based on current repository state as of 2026-04-21**
+**Based on current repository state as of 2026-04-23**
 
 ---
 
@@ -14,7 +14,7 @@ The current repository is **not starting from zero**. It already contains a mean
 - **Identity foundations are implemented**
 - **Vault foundations are implemented**
 - **CLI flows for identity/vault bootstrap exist**
-- **Desktop app, web app, FUSE mount, full CRDT sync, and social runtime remain mostly planned or placeholder**
+- **Desktop app, web app, full CRDT sync, and social runtime remain mostly planned or placeholder; the vault mount now has a Linux-first virtual mount MVP**
 
 That means it should not be treated as a greenfield vision anymore. Instead, it should be expanded into **repo-grounded delivery** that turns the current Aegis codebase into:
 
@@ -79,7 +79,8 @@ This is defined in `aegis/Cargo.toml`.
   - `VaultStore` exists and performs per-file AEAD encryption.
   - Social vault bootstrap exists.
   - `SyncSnapshot` merge primitive exists.
-  - `mount.rs` is still a placeholder.
+  - `mount.rs` now provides a Linux-first virtual mount with `ReadOnly` and `ReadWrite` modes.
+  - Writable mounts can refresh from vault state, sync create/update/delete changes back into encrypted storage, and clean plaintext on unmount.
   - `sync.rs` is still a minimal snapshot abstraction, not a networked sync engine.
 
 ### Placeholder / planned
@@ -193,10 +194,10 @@ The implementation goal should be:
 Current state:
 - `aegis-platform` exists as abstraction layer.
 - Platform initialization exists.
-- FUSE/keyring/TPM integration are not yet visibly delivered as production features.
+- `VaultStore` is now wired into the platform `EncryptedFs` abstraction and the vault exposes a Linux-first virtual mount workflow.
 
 Gaps:
-- real FUSE mount implementation
+- cross-platform/native mount backends beyond the current Linux-first virtual projection
 - secure key storage integration
 - platform-specific privilege/runtime management
 - browser-safe local protocol integration
@@ -223,10 +224,10 @@ Current state:
 - manifest exists
 - social bootstrap exists
 - sync snapshot exists
-- mount placeholder exists
+- Linux-first virtual mount exists with read-only/read-write projection, refresh, writeback sync, and plaintext cleanup on unmount
 
 Gaps:
-- true virtual filesystem mount
+- cross-platform mount backends and desktop/runtime service integration
 - richer metadata model
 - CRDT op log and network sync protocol
 - remote replication flows
@@ -425,7 +426,7 @@ Use DID/service records as the basis for:
 - path-based key derivation
 - social bootstrap
 - minimal sync snapshot
-- placeholder FUSE mount
+- Linux-first virtual mount with read-only/read-write projection, refresh, sync-back on unmount, and mount hardening
 
 ### Required work
 
@@ -478,37 +479,41 @@ Define how vault master keys are handled:
 - optional passphrase wrap
 - future TPM/Secure Enclave wrapping
 
-## 1.3 Real FUSE / virtual filesystem implementation
+## 1.3 Real FUSE / virtual filesystem implementation — COMPLETED FOR LINUX-FIRST MVP ✅
 
 ### Current repo basis
-- `mount.rs` is placeholder only.
+- `mount.rs` now materializes decrypted vault contents into a managed mount directory.
+- `MountMode::{ReadOnly, ReadWrite}` exists directly in `aegis-vault`.
+- Writable mounts support create/update/delete sync-back into encrypted storage.
+- Mount lifecycle now rejects non-empty targets, overlapping vault/mount roots, and symlink traversal escapes.
 
-### Required work
+### Status
+The Linux-first MVP for vault-backed filesystem projection is now implemented. Remaining work is to extend this into cross-platform/native mount backends and integrate it cleanly into the future desktop/runtime services.
 
-#### 1.3.1 Implement read-only mount first
-First production step should be **read-only** FUSE mount of logical vault paths.
-This is safer and enough to:
-- prove transparent decryption,
-- support browser/editor access,
-- validate path semantics,
-- support diagnostics.
+#### 1.3.1 Read-only projection — COMPLETED ✅
+The first production step is now in place: a **read-only** virtual mount of logical vault paths.
+It now:
+- proves transparent decryption,
+- supports browser/editor access,
+- validates path semantics,
+- supports diagnostics.
 
-#### 1.3.2 Add write support second
-Once read-path is stable:
-- create/write/truncate/delete
-- manifest update coordination
-- atomic write staging
-- crash safety
+#### 1.3.2 Write support second — COMPLETED FOR MVP ✅
+Writable mounts now support:
+- create/update/delete via mount-side sync
+- manifest update coordination through `VaultStore`
+- atomic sibling `.tmp` staging for manifest/unlock/plaintext replacement
+- cleanup of plaintext projection on unmount
 
-#### 1.3.3 Cross-platform strategy
-- Linux: primary target first
+#### 1.3.3 Cross-platform strategy — STILL OPEN
+- Linux: current implemented path
 - macOS: secondary
 - Windows: likely separate abstraction later
 
-Do not block Phase 1 on all platforms. Ship Linux first.
+Do not block runtime progress on all platforms. The repo now correctly ships Linux first.
 
 #### 1.3.4 Browser/runtime integration goal
-The FUSE layer should make it possible for the browser/editor/runtime to treat selected vault content as normal files while preserving encrypted backing storage.
+The virtual mount layer should make it possible for the browser/editor/runtime to treat selected vault content as normal files while preserving encrypted backing storage.
 
 ## 1.4 Local node state model — COMPLETED ✅
 
@@ -529,7 +534,7 @@ This model can live initially in `aegis-social` or a new supporting crate/module
 ## Deliverables
 - production-ready identity/vault local substrate
 - true vault storage contract
-- read-only then read-write FUSE mount
+- Linux-first read-only and read-write virtual mount with sync-back lifecycle
 - clear local private node state object
 
 ---
@@ -1096,7 +1101,7 @@ Only after distro maturity:
 
 ## 8.1 `crates/aegis-vault`
 ### Near-term
-- implement real mount layer
+- extend the Linux-first virtual mount into desktop/runtime services and future native backends
 - expand manifest metadata
 - add JSON/document helpers
 - add delete/tombstone ops

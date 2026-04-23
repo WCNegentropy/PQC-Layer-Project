@@ -24,7 +24,7 @@ The canonical sequencing is also repo-grounded now:
 ## Current Repo Maturity
 
 - ✅ **Implemented:** `aegis-crypto`, `aegis-gateway`, `aegis-sanctuary`
-- 🟡 **Foundation implemented:** `aegis-identity`, `aegis-vault`
+- 🟡 **Foundation implemented:** `aegis-identity`, `aegis-vault` (with the Linux-first virtual mount now implemented)
 - 🟧 **Placeholder:** `aegis-desktop`, `aegis-web`
 - 🔲 **Planned:** `aegis-social`, real sync/messaging/shared-node runtime, immutable AegisOS image
 
@@ -50,7 +50,7 @@ The project is organized as a 7-layer Rust workspace:
 | `aegis-crypto` | L2 | Hybrid KEM, AEAD, ML-DSA-65 signatures | ✅ Implemented |
 | `aegis-gateway` | L3 | PQ-WG tunnel client: TUN, handshake, transport, anti-replay, rekeying | ✅ Implemented |
 | `aegis-identity` | L4 | DIDs, key hierarchy, VCs, discovery/auth | ✅ Foundation implemented |
-| `aegis-vault` | L5 | Encrypted storage, FUSE, CRDT sync | ✅ Foundation implemented |
+| `aegis-vault` | L5 | Encrypted storage, Linux-first virtual mount, sync foundations | ✅ Foundation implemented |
 | `aegis-social` | L7 | Private-node social runtime, optional shared nodes, federation | Module stubs |
 | `aegis-sanctuary` | — | Current PQ-WG responder/server for optional/private/shared node roles | ✅ Implemented |
 

@@ -21,7 +21,7 @@ The repo-grounded delivery sequence is:
 ## Current Repo Maturity
 
 - ✅ **Implemented:** `aegis-crypto`, `aegis-gateway`, `aegis-sanctuary`
-- 🟡 **Foundation implemented:** `aegis-identity`, `aegis-vault`
+- 🟡 **Foundation implemented:** `aegis-identity`, `aegis-vault` (including the Linux-first virtual mount/writeback workflow)
 - 🟧 **Placeholder:** `aegis-desktop`, `aegis-web`
 - 🔲 **Planned:** `aegis-social`, full sync/messaging/shared-node runtime, AegisOS packaging
 
@@ -35,7 +35,7 @@ aegis/
 │   ├── aegis-gateway/      # PQ-WG tunnel client: TUN, handshake, transport, anti-replay, rekeying
 │   ├── aegis-platform/     # OS abstraction: TUN, keyring, entropy, FS traits
 │   ├── aegis-identity/     # Identity, DIDs, discovery records, and authentication
-│   ├── aegis-vault/        # Secure data storage and retrieval
+│   ├── aegis-vault/        # Encrypted store, virtual mount, and sync foundations
 │   ├── aegis-social/       # Planned private-node social runtime and optional shared rooms
 │   └── aegis-sanctuary/    # Current PQ-WG server primitive for self-hosted private/shared nodes
 ├── apps/                   # Application binaries
@@ -163,7 +163,8 @@ and ML-DSA-65-signed credentials.
 ### aegis-vault
 
 Secure data storage and retrieval with per-file AEAD encryption, logical-path
-key derivation, and bootstrap creation of the private-node social vault layout.
+key derivation, a Linux-first virtual mount with read-only/read-write projection,
+and bootstrap creation of the private-node social vault layout.
 
 ### aegis-social
 

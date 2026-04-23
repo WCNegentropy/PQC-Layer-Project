@@ -320,9 +320,10 @@ The guiding principle: **if it is core to user sovereignty, it is free and user-
 ### Phase 2A — Identity Foundation (prerequisite)
 - ✅ Implemented foundational `aegis-identity` support: local `did:aegis` generation, root→device identity issuance, ML-DSA-65 VC issuance/verification, and signed auth challenges
 - ✅ Implemented foundational `aegis-vault` support: per-file AEAD encryption and bootstrap creation of the social vault directory structure
+- ✅ Implemented Linux-first virtual vault mount support: read-only/read-write projection, explicit refresh/sync, sync-back on unmount, and plaintext cleanup
 - ✅ Implemented local DID/service-record support for manual private-node discovery bootstrap
 - ✅ Added CLI commands: `aegis vault init`, `aegis identity new`, `aegis identity show`
-- ⏳ Still planned for later in Phase 2A: production FUSE mount, full CRDT sync engine, recovery flows, and multi-node loopback proof
+- ⏳ Still planned for later in Phase 2A: full CRDT sync engine, recovery flows, multi-node loopback proof, and cross-platform/native mount backends beyond the current Linux-first virtual projection
 
 ### Phase 2B — Social Core
 - Implement `aegis-social` crate:
