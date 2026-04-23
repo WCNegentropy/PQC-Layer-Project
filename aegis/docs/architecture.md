@@ -51,7 +51,7 @@ The canonical product sequence is:
 │   Browser/runtime shell, CLI, editors, local protocol surface   │
 ├─────────────────────────────────────────────────────────────────┤
 │                    LAYER 5: DATA SOVEREIGNTY VAULT              │
-│      Encrypted store, virtual mount, object store, sync engine  │
+│       Encrypted store, virtual mount, object store, sync engine │
 ├─────────────────────────────────────────────────────────────────┤
 │                    LAYER 4: IDENTITY ANCHOR                     │
 │         DID, Verifiable Credentials, Key Hierarchy, Auth        │

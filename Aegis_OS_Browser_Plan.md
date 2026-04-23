@@ -494,9 +494,9 @@ The Linux-first MVP for vault-backed filesystem projection is now implemented. R
 The first production step is now in place: a **read-only** virtual mount of logical vault paths.
 It now:
 - proves transparent decryption,
-- support browser/editor access,
-- validate path semantics,
-- support diagnostics.
+- supports browser/editor access,
+- validates path semantics,
+- supports diagnostics.
 
 #### 1.3.2 Write support second — COMPLETED FOR MVP ✅
 Writable mounts now support:
