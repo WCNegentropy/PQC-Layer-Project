@@ -9,6 +9,7 @@ control over their data, identity, and communications.
 - 🛡️ **AEAD:** ChaCha20-Poly1305 authenticated encryption for tunnel transport
 - ✍️ **Signatures:** ML-DSA-65 (FIPS 204) post-quantum digital signatures
 - 🌐 **Gateway:** PQ-WG tunnel client with TUN, handshake, transport encryption, anti-replay, rekeying
+- 🗂️ **Vault mount:** Linux-first read-only/read-write virtual vault projection with refresh, sync-back, and plaintext cleanup on unmount
 - 🏠 **Private-node-first direction:** intended social topology gives every user their own node by default; shared Sanctuary nodes are opt-in
 - 🏰 **Sanctuary:** current PQ-WG server primitive for self-hosted private/shared nodes, NAT experiments, and future optional shared infrastructure
 - 🔑 **CLI:** `aegis up/down/status/keygen` commands
@@ -17,7 +18,7 @@ control over their data, identity, and communications.
 ## Current Repo Maturity
 
 - ✅ **Implemented now:** `aegis-crypto`, `aegis-gateway`, and `aegis-sanctuary`
-- 🟡 **Foundation implemented:** `aegis-identity` and `aegis-vault`
+- 🟡 **Foundation implemented:** `aegis-identity` and `aegis-vault` (including the Linux-first virtual mount + mount-backed sync lifecycle)
 - 🟧 **Placeholder:** `aegis-desktop` and `aegis-web`
 - 🔲 **Planned:** the full `aegis-social` private-node runtime, real sync/messaging, and any immutable AegisOS image
 
@@ -65,12 +66,12 @@ Aegis is moving toward a **private-node-by-default** model for its social layer:
 
 ```
 Layer 7: Social Fabric     — Private nodes by default, opt-in shared nodes, PQ messaging, ActivityPub
-Layer 5: Data Vault         — Encrypted FS (FUSE), per-file AEAD, CRDT sync
+Layer 5: Data Vault         — Encrypted vault, virtual mount, per-file AEAD, sync foundations
 Layer 4: Identity Anchor    — DIDs, VCs, key hierarchy
 Layer 3: Quantum Gateway    — PQ-WG tunnel, DNS, traffic shaping     ✅
          Sanctuary Server   — PQ-WG server primitive for optional/shared nodes ✅
 Layer 2: Crypto Engine      — Hybrid KEM, AEAD, ML-DSA, KDF          ✅
-Layer 1: Platform Abstract  — TUN, keyring, entropy, FUSE traits     ✅
+Layer 1: Platform Abstract  — TUN, keyring, entropy, FS traits       ✅
 ```
 
 ## Documentation

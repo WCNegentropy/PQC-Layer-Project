@@ -51,7 +51,7 @@ The canonical product sequence is:
 │   Browser/runtime shell, CLI, editors, local protocol surface   │
 ├─────────────────────────────────────────────────────────────────┤
 │                    LAYER 5: DATA SOVEREIGNTY VAULT              │
-│         Encrypted FS (FUSE), Object Store, CRDT Sync Engine     │
+│      Encrypted store, virtual mount, object store, sync engine  │
 ├─────────────────────────────────────────────────────────────────┤
 │                    LAYER 4: IDENTITY ANCHOR                     │
 │         DID, Verifiable Credentials, Key Hierarchy, Auth        │
@@ -63,7 +63,7 @@ The canonical product sequence is:
 │         Hybrid PQC (ML-KEM + X25519), ML-DSA, AEAD, KDF        │
 ├─────────────────────────────────────────────────────────────────┤
 │                    LAYER 1: PLATFORM ABSTRACTION                │
-│         TUN/TAP, FUSE, Keyring, HSM/TPM, Entropy               │
+│       TUN/TAP, filesystem traits, Keyring, HSM/TPM, Entropy    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -283,7 +283,7 @@ let pk = HybridPublicKey::from_bytes(&pk_bytes)?;
 - [x] `did:aegis` generation and DID document/service record output
 - [x] ML-DSA-65 verifiable credentials and auth challenge/response foundations
 - [x] Encrypted vault storage and private-node social bootstrap layout
-- [ ] Production FUSE filesystem mount
+- [x] Linux-first virtual vault mount with read-only/read-write projection and mount-backed sync
 - [ ] Real CRDT-based multi-device/network sync
 - [ ] Recovery, rotation, and multi-device coordination flows
 - [ ] Loopback proof of two local private nodes connecting directly
@@ -529,7 +529,7 @@ Multi-device sync uses CRDTs (Conflict-free Replicated Data Types):
 - **Directory structure:** OR-Set (observed-remove set)
 - **Conflict resolution:** Automatic via CRDT semantics; no user intervention
 
-Current implementation note: `aegis-vault` now includes an encrypted per-file store and a `SyncSnapshot` merge primitive, while a full networked CRDT sync engine remains planned.
+Current implementation note: `aegis-vault` now includes an encrypted per-file store, a Linux-first virtual mount with read-only/read-write projection and sync-back on unmount, and a `SyncSnapshot` merge primitive. A full networked CRDT sync engine remains planned.
 
 ---
 
@@ -577,7 +577,7 @@ ActivityPub extensions for Aegis:
 |----------------------|-------------------|--------------------|--------------------|--------------------|
 | TUN interface        | `/dev/net/tun`    | `utun` kernel      | Wintun.dll         | NetworkExtension   |
 | Keyring              | libsecret/DBUS    | Keychain Services  | Credential Manager | Keychain/Keystore  |
-| FUSE mount           | `libfuse3`        | `macfuse`          | WinFsp             | N/A                |
+| Vault mount          | Linux virtual projection ✅ | `macfuse` or equivalent (planned) | WinFsp or equivalent (planned) | N/A |
 | TPM/HSM              | `tpm2-tss`        | Secure Enclave     | Windows TPM        | Secure Enclave     |
 | System tray          | `dbus` indicators | NSStatusItem       | System Tray API    | N/A                |
 | Privileges           | CAP_NET_ADMIN/root| root               | Admin              | VPN entitlement    |
@@ -605,7 +605,7 @@ ActivityPub extensions for Aegis:
 2. **Private Node ↔ Remote Private/Shared Node** — Intended to be mutually authenticated via PQ transport + identity checks.
 3. **Discovery/Bootstrap ↔ Client** — Hints are untrusted until verified against identity material.
 4. **Key Material ↔ Memory** — Zeroized on drop; never logged.
-5. **Vault ↔ Filesystem** — Encrypted at rest; plaintext only in FUSE buffer.
+5. **Vault ↔ Filesystem** — Encrypted at rest; plaintext only in the managed mount directory during an active mount.
 
 ---
 
