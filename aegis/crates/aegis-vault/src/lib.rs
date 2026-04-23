@@ -42,6 +42,10 @@ pub enum VaultError {
     /// Sync conflict that could not be automatically resolved.
     #[error("sync conflict: {0}")]
     SyncConflict(String),
+
+    /// Mount or virtual filesystem error.
+    #[error("vault mount error: {0}")]
+    Mount(String),
 }
 
 #[cfg(test)]

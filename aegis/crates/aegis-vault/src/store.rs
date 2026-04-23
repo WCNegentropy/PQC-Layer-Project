@@ -16,6 +16,8 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aegis_crypto::{AeadCipher, AEAD_KEY_SIZE, AEAD_NONCE_SIZE};
+use aegis_platform::fs::{EncryptedFs, FileEntry};
+use aegis_platform::PlatformError;
 use hkdf::Hkdf;
 use rand::RngCore;
 use serde::de::DeserializeOwned;
@@ -168,6 +170,7 @@ pub struct VaultRepairReport {
 }
 
 /// Minimal encrypted vault store with per-file AEAD encryption.
+#[derive(Clone)]
 pub struct VaultStore {
     root: PathBuf,
     master_key: [u8; AEAD_KEY_SIZE],
@@ -224,6 +227,11 @@ impl VaultStore {
         let root = root.as_ref().to_path_buf();
         let master_key = Self::read_master_key_file(&root)?;
         Self::open(root, &master_key)
+    }
+
+    /// Return the vault root on disk.
+    pub fn root_path(&self) -> &Path {
+        &self.root
     }
 
     /// Persist the vault master key to the default file-based unlock location.
@@ -352,6 +360,17 @@ impl VaultStore {
             .map_err(|err| VaultError::CryptoError(err.to_string()))
     }
 
+    /// Check whether a non-tombstoned logical path exists in the vault.
+    pub fn exists(&self, logical_path: &str) -> Result<bool, VaultError> {
+        let logical_path = normalize_logical_path(logical_path)?;
+        let manifest = self.load_manifest()?;
+        Ok(manifest
+            .entries
+            .get(&logical_path)
+            .map(|entry| !entry.tombstone)
+            .unwrap_or(false))
+    }
+
     /// Delete an encrypted file from the vault.
     pub fn delete(&self, logical_path: &str) -> Result<(), VaultError> {
         let logical_path = normalize_logical_path(logical_path)?;
@@ -431,6 +450,75 @@ impl VaultStore {
                 capability_labels: entry.capability_labels.clone(),
             })
             .collect())
+    }
+
+    /// Return platform-style entries for the direct children of a logical directory.
+    pub fn list_file_entries(&self, logical_dir: &str) -> Result<Vec<FileEntry>, VaultError> {
+        let prefix = normalize_directory_prefix(logical_dir)?;
+        let manifest = self.load_manifest()?;
+        let mut directories = BTreeMap::<String, u64>::new();
+        let mut files = BTreeMap::<String, FileEntry>::new();
+
+        for (path, entry) in &manifest.entries {
+            if entry.tombstone || !matches_prefix(path, prefix.as_deref()) {
+                continue;
+            }
+
+            let suffix = match prefix.as_deref() {
+                Some(prefix) => match path
+                    .strip_prefix(prefix)
+                    .and_then(|value| value.strip_prefix('/'))
+                {
+                    Some(value) => value,
+                    None if path == prefix => "",
+                    None => continue,
+                },
+                None => path.as_str(),
+            };
+
+            if suffix.is_empty() {
+                continue;
+            }
+
+            let mut components = suffix.split('/');
+            let child = components.next().unwrap_or_default();
+            if child.is_empty() {
+                continue;
+            }
+
+            let child_path = match prefix.as_deref() {
+                Some(prefix) => format!("{prefix}/{child}"),
+                None => child.to_string(),
+            };
+
+            if components.next().is_some() {
+                directories
+                    .entry(child_path.clone())
+                    .and_modify(|modified| *modified = (*modified).max(entry.updated_at))
+                    .or_insert(entry.updated_at);
+            } else {
+                files.insert(
+                    child_path.clone(),
+                    FileEntry {
+                        path: child_path,
+                        size: entry.plaintext_len as u64,
+                        is_dir: false,
+                        modified: entry.updated_at,
+                    },
+                );
+            }
+        }
+
+        for (path, modified) in directories {
+            files.entry(path.clone()).or_insert(FileEntry {
+                path,
+                size: 0,
+                is_dir: true,
+                modified,
+            });
+        }
+
+        Ok(files.into_values().collect())
     }
 
     /// Serialize a JSON value and store it in the vault.
@@ -775,7 +863,7 @@ impl VaultStore {
         let manifest_path = self.root.join(MANIFEST_FILE);
         let contents = serde_json::to_string_pretty(manifest)
             .map_err(|err| VaultError::Serialization(err.to_string()))?;
-        std::fs::write(manifest_path, contents)?;
+        atomic_write(&manifest_path, contents.as_bytes())?;
         Ok(())
     }
 
@@ -783,7 +871,7 @@ impl VaultStore {
         let metadata_path = self.root.join(UNLOCK_METADATA_FILE);
         let contents = serde_json::to_string_pretty(metadata)
             .map_err(|err| VaultError::Serialization(err.to_string()))?;
-        std::fs::write(metadata_path, contents)?;
+        atomic_write(&metadata_path, contents.as_bytes())?;
         Ok(())
     }
 
@@ -824,16 +912,32 @@ fn default_master_key_path() -> String {
 }
 
 fn write_secure_bytes(path: &Path, contents: &[u8]) -> Result<(), VaultError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, contents)?;
+    atomic_write(path, contents)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
+}
+
+fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), VaultError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temp_path = sibling_temp_path(path);
+    std::fs::write(&temp_path, contents)?;
+    std::fs::rename(temp_path, path)?;
+    Ok(())
+}
+
+pub(crate) fn sibling_temp_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "aegis.tmp".into());
+    path.with_file_name(format!(".{file_name}.tmp"))
 }
 
 fn collect_files_recursively(path: &Path) -> Result<Vec<PathBuf>, VaultError> {
@@ -922,6 +1026,37 @@ fn infer_schema(logical_path: &str) -> VaultDocumentSchema {
         path if path.starts_with("runtime/") => VaultDocumentSchema::Runtime,
         path if path.starts_with("cache/") => VaultDocumentSchema::Cache,
         _ => VaultDocumentSchema::Generic,
+    }
+}
+
+fn vault_to_platform_error(err: VaultError) -> PlatformError {
+    match err {
+        VaultError::Io(err) => PlatformError::Io(err),
+        VaultError::Mount(message) => PlatformError::Unsupported(message),
+        other => PlatformError::Unsupported(other.to_string()),
+    }
+}
+
+impl EncryptedFs for VaultStore {
+    fn read_file(&self, path: &str) -> Result<Vec<u8>, PlatformError> {
+        self.read(path).map_err(vault_to_platform_error)
+    }
+
+    fn write_file(&self, path: &str, data: &[u8]) -> Result<(), PlatformError> {
+        self.write(path, data).map_err(vault_to_platform_error)
+    }
+
+    fn delete_file(&self, path: &str) -> Result<(), PlatformError> {
+        self.delete(path).map_err(vault_to_platform_error)
+    }
+
+    fn list_dir(&self, path: &str) -> Result<Vec<FileEntry>, PlatformError> {
+        self.list_file_entries(path)
+            .map_err(vault_to_platform_error)
+    }
+
+    fn exists(&self, path: &str) -> Result<bool, PlatformError> {
+        self.exists(path).map_err(vault_to_platform_error)
     }
 }
 
